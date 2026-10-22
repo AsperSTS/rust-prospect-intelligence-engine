@@ -1,0 +1,12 @@
+[application]
+name = "Prospect Intelligence"
+default_platform = "mobile"
+out_dir = "dist"
+
+[bundle]
+identifier = "com.asper.prospect-intelligence"
+publisher = "Elvis Yael De los Santos"
+icon = ["../../assets/app-icon.png"]
+
+[bundle.ios]
+deployment_target = "16.0"

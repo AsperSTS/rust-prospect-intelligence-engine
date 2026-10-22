@@ -12,6 +12,7 @@ Aplicación personal en Rust y Dioxus Desktop. Trabajar dentro de este directori
 - La auditoría legal profunda quedó diferida por el usuario; no afirmar que está completada.
 - Mantener separados los perfiles de oferta, sus puntajes y sus métricas, con CRM compartido.
 - Verificar builds, Clippy, pruebas relevantes y comportamiento nativo antes de entregar cambios.
+- Nunca hacer un commit de forma autónoma. Antes de crear cualquier commit, proponer varias opciones de mensaje con redacción humana y pedir confirmación explícita al usuario; no ejecutar el commit hasta que el usuario elija y autorice.
 
 - Actualizar fuentes sólo por acción explícita, con los presupuestos de updates::pull_batch. No restaurar importaciones ilimitadas ni reinicio automático de segmentos completos.
 - No editar migraciones SQL ya aplicadas: RUST_SCHEMA (1) y updates::SCHEMA (2). Crear una nueva versión aditiva para cambios de esquema.
