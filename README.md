@@ -1,121 +1,102 @@
-# Prospect Intelligence — Rust + Dioxus · 0.2.1
+# Prospect Intelligence
 
-Primera versión personal para prospección y seguimiento comercial. Funciona localmente en macOS; no requiere Python, Streamlit, servidor ni suscripciones.
+Aplicación de escritorio en Rust y Dioxus Desktop para prospección B2B, calificación de cuentas y seguimiento comercial local. Utiliza datos públicos de INEGI (DENUE), persistencia en SQLite y reglas deterministas para priorización de contactos.
 
-## Abrir la aplicación
+## Características
 
-Doble clic en `Abrir app.command`, o en `dist/Prospect Intelligence.app`.
+- **Persistencia local:** Base de datos SQLite (`prospectos.db`) en el directorio de usuario. No requiere servidores externos ni servicios de suscripción.
+- **Calificación por reglas:** Cálculo explicable de *fit* y prioridad comercial mediante configuraciones JSON auditables, sin modelos opacos.
+- **Enriquecimiento web:** Detección de señales técnicas, comerciales y de contacto en sitios web declarados por los establecimientos.
+- **Contacto manual:** Generación de borradores contextuales a partir de evidencia y plantillas. La aplicación no realiza envíos automáticos ni registra interacciones sin acción explícita del usuario.
+- **Métricas y oportunidades:** Control de conversiones por giro económico y seguimiento de importes presupuestados frente a cobros reales en MXN y USD.
+- **Doble perfil de oferta:** Separación de reglas, puntuaciones y borradores para *Automatización y sistemas* y *Web y marketing*, manteniendo el historial compartido por establecimiento.
+
+## Capturas de pantalla
+
+### Lista priorizada del día
+Flujo principal de trabajo: selección de prospectos según prioridad, desglose de evidencia web e hipótesis comercial, y edición del borrador de mensaje.
+
+![Lista priorizada del día](assets/portfolio/01-today-prioritized-list.png)
+
+### Seguimientos
+Control de contactos con fecha de seguimiento cumplida y generación de respuestas de seguimiento.
+
+![Seguimientos](assets/portfolio/02-follow-ups.png)
+
+### Conversaciones abiertas
+Seguimiento de prospectos en interacción, notas de avance y actualización de etapas del CRM.
+
+![Conversaciones abiertas](assets/portfolio/03-open-conversations.png)
+
+### Métricas comerciales
+Visualización del embudo de ventas, tasas de avance y comparativa por actividad económica.
+
+![Métricas comerciales](assets/portfolio/04-commercial-metrics.png)
+
+### Cartera de oportunidades
+Administración de propuestas comerciales con desglose independiente de importes cotizados y cobros acumulados.
+
+![Cartera de oportunidades](assets/portfolio/05-opportunities.png)
+
+## Ejecución en macOS
+
+### Binario empaquetado
+El paquete compilado para Apple Silicon se encuentra en `dist/`:
 
 ```sh
 open "dist/Prospect Intelligence.app"
 ```
 
-El paquete está compilado para Apple Silicon. Usa una firma local ad hoc para uso personal. También tienes `dist/Prospect-Intelligence-0.2.1-macOS.dmg` para instalarla mediante arrastre a Applications.
+También está disponible la imagen de disco montable en `dist/Prospect-Intelligence-0.2.1-macOS.dmg`.
 
-## Actualizar sólo cuando lo decides
+## Estructura del proyecto
 
-El **Dashboard** lee SQLite y propone tres prospectos para empezar. No consulta APIs ni revisa sitios al abrirlo. **Hoy** mantiene su estructura.
+El repositorio está organizado como un workspace de Rust:
 
-En **Base → Gestionar datos** encontrarás:
+```text
+.
+├── Cargo.toml             # Configuración del workspace y perfil de release
+├── crates/
+│   ├── core/              # Dominio, almacenamiento SQLite (rusqlite), scoring y métricas
+│   ├── desktop/           # Interfaz gráfica en Dioxus Desktop
+│   └── cli/               # Interfaz de línea de comandos para gestión de datos y backups
+├── config/                # Diccionarios SCIAN, señales, reglas de scoring y plantillas
+├── assets/                # Iconos del sistema y capturas
+├── scripts/               # Scripts de compilación, empaquetado para macOS y utilidades
+└── docs/                  # Documentación técnica, inventario de licencias y seguridad
+```
 
-- **Importar nuevos:** sólo segmentos que no comenzaron; los completos se omiten.
-- **Reanudar pendientes:** retoma la siguiente página guardada, sin volver al principio.
-- **Iniciar revisión:** reinicia explícitamente los grupos seleccionados; requiere cerrar los pendientes actuales.
-- **Límite global:** cinco páginas por clic de forma predeterminada, hasta 200 registros por página. Puedes elegir entre una y veinte páginas en Ajustes. Cada página tiene como máximo tres intentos HTTP.
-- Cada lote se detiene. La UI muestra intentos y cantidades nuevas, modificadas y sin cambios. El CRM se conserva y los registros públicos idénticos no se reescriben.
+## Desarrollo y verificación
 
-Las fechas reflejan consultas completas, no una publicación nueva de INEGI. Los días configurados sólo sugieren revisar. Sitios revisa hasta 100 dominios por clic: pendientes, antiguos o fallidos. Banxico e INEGI también requieren botones.
-
-El recálculo periódico de prioridades ahora ocurre una vez al abrir y cuando cambia el día; los cambios del CRM siguen recalculando sus propios registros. No realiza consultas de red.
-
-## Ajustes persistentes
-
-**General:** apariencia claro/oscuro, firma y metas. **Datos:** selector de las 32 entidades, tamaños, presupuesto DENUE y días de revisión. **Fuentes:** tokens propios y respaldo. Guardar preferencias aplica los cambios; no inicia descargas.
-
-Los ajustes se guardan atómicamente fuera del paquete, con versión de esquema. Antes de sustituir ajustes antiguos se conserva una copia privada en respaldos. Los tokens siguen en su archivo privado independiente.
-
-Una instalación vacía muestra cómo configurar DENUE y elegir estados. Tu edición conserva su base y credenciales; no se exige volver a introducirlas.
-
-## Empezar el día
-
-1. Elige **Automatización y sistemas** o **Web y marketing**. Cada oferta tiene sus puntajes y mensajes; comparten el historial del establecimiento.
-2. En **Hoy**, revisa contexto, evidencia y borrador. Copiar o abrir el canal no registra el envío.
-3. Después de enviar tú, registra el contacto; revisa **Seguimientos** y **Conversaciones**.
-4. Captura propuestas y acuerdos en **Oportunidades**. Separa importe de la oportunidad y dinero realmente cobrado.
-5. Usa **Métricas**, **Territorios** e **Indicadores** para decidir qué actividad y municipio priorizar.
-
-La interfaz compacta limita cada grupo a dos o tres vistas. Resumen, evidencia e historial se consultan por separado; cambiar de vista conserva los borradores.
-
-En **Base** puedes importar DENUE, recalcular reglas, revisar sitios y exportar CSV/XLSX. Cada exportación incluye un archivo de atribución y filtros.
-
-En **Territorios**, selecciona municipio y negocio para ver calles, marcador y zoom. La comparación municipal y el botón **Ver ficha** conectan el mapa con la prospección. El mapa usa OpenStreetMap sin clave ni suscripción y necesita conexión para vistas nuevas.
-
-## Datos y fuentes
-
-La copia migrada conserva 4,709 establecimientos, 448 señales web y 227 resultados de caché. La base Python original sigue disponible.
-
-Los datos, respaldos, exportaciones, plantillas y credenciales permanecen en `~/Library/Application Support/Prospect Intelligence`. Los tokens quedan fuera del código con permisos 600.
-
-DENUE e Indicadores INEGI usan el token compartido. Banxico usa el token SIE configurado. Las tres fuentes se validaron con consultas reales; los resultados económicos quedan almacenados para consulta sin conexión.
-
-## Desarrollar y comprobar
+Comandos para compilación, pruebas y análisis estático:
 
 ```sh
+# Ejecutar en modo desarrollo
 cargo run --locked -p prospect-desktop
+
+# Ejecutar pruebas unitarias y de integración
 cargo test --locked --workspace
+
+# Análisis estático estricto con Clippy
 cargo clippy --locked --workspace --all-targets -- -D warnings
+
+# Verificación de formato
 cargo fmt --all -- --check
+
+# Auditoría de dependencias y licencias
 cargo deny --offline --locked check
+
+# Generar bundle .app y DMG para macOS
 ./scripts/bundle-macos.sh
 ./scripts/package-dmg.sh
 ```
 
-El empaquetador usa dependencias previamente descargadas. Para preparar un equipo nuevo, ejecuta primero `cargo fetch --locked`.
+## Datos y credenciales
 
-- `crates/core`: SQLite, reglas, mensajes, fuentes, trabajos y métricas.
-- `crates/desktop`: interfaz Dioxus.
-- `crates/cli`: importación, análisis, respaldo, recuperación y exportación.
-- `config`: taxonomías, señales y plantillas originales.
-- `docs`: investigación, verificaciones, dependencias y limitaciones.
+- Los datos operativos, respaldos y plantillas se almacenan en `~/Library/Application Support/Prospect Intelligence/`.
+- Los tokens de consulta para APIs públicas (INEGI DENUE, Banxico SIE) se configuran en el archivo privado `credentials.env` con permisos `0600`.
+- El repositorio no almacena tokens, bases de datos comerciales reales ni exportaciones de contactos.
 
-La CLI compilada está en `dist/prospectos`. Usa `./dist/prospectos --help` para ver comandos.
+## Licencia
 
-## Estado de verificación
-
-Pasaron las 33 pruebas Rust, con 704 escenarios sintéticos de paridad y verificaciones adicionales de grupos, textos y redondeo. Se compararon también los 4,709 registros reales.
-
-Dos motivos de agrupación difieren al rechazar un dominio malformado; está documentado. Clippy pasa sin advertencias. cargo-deny pasa con una excepción explícita por una dependencia archivada.
-
-Se probaron nativamente búsqueda, edición rápida, notas, navegación durante guardado, respuestas, perfiles separados, oportunidades, importes, preferencias Unicode, métricas, territorios y tema oscuro. Las pruebas usaron una base aislada.
-
-El análisis completo medido en release tarda 2.29 s; una consulta filtrada medida tarda 0.03 s, incluyendo arranque de la CLI. Son mediciones de este equipo, no garantías de escala.
-
-## Plan y mejoras
-
-Consulta [PLAN_MIGRACION.md](PLAN_MIGRACION.md) y [verificaciones y límites](docs/VERIFICACION_Y_LIMITES.md). La auditoría legal profunda queda para después de la migración, conforme a lo solicitado.
-
-El núcleo gratuito prioriza conseguir clientes. Censos Económicos, Marco Geoestadístico, archivos del cliente y análisis operativo forman parte de la ampliación posterior de BI.
-
-El icono propio está en `assets/app-icon.svg`. Consulta [la revisión y distribución macOS](docs/APP_MACOS.md) para el estado 0.2.1 y los pasos de publicación.
-
-## CLI con lotes acotados
-
-```sh
-./dist/prospectos pull --modo nuevos
-./dist/prospectos pull --modo reanudar
-./dist/prospectos pull --modo revisar --limite 1000
-```
-
-`--limite` es un presupuesto global, en múltiplos de 200 entre 200 y 4000. Si se omite, usa el presupuesto de Ajustes. Los modos de `run` respetan el mismo límite; su enriquecimiento adicional sigue siendo una acción manual explícita.
-
-La ampliación de BI, MCP y preparación para GitHub está en [la hoja de ruta](docs/HOJA_DE_RUTA_BI_MCP.md).
-
-## Navegación y caché 0.2.1
-
-Dashboard, Base, Métricas y Territorios conservan instantáneas locales durante la sesión. Las claves incluyen oferta, filtros, dimensión, preferencias pertinentes y revisión de datos; volver a una vista no muestra otra pantalla de carga.
-
-SQLite comparte lecturas repetidas y reúne los perfiles en una consulta. Guardar CRM, importar o enriquecer invalida sus resultados. La UI también invalida después de trabajos, preferencias y cambio de fecha.
-
-Una comprobación de metadatos SQLite cada 60 segundos detecta escrituras de otra instancia local. No descarga fuentes ni recalcula registros. Ambas cachés tienen límites de entradas y se vacían al cerrar la app.
-
-Ver [la medición y sus límites](docs/RENDIMIENTO_NAVEGACION.md). Hoy conserva su distribución; cambiar de oferta conserva puntajes, mensajes y métricas separados.
+Distribuido bajo licencia [MIT](LICENSE). Las licencias de dependencias de terceros se detallan en [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

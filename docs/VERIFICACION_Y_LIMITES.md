@@ -1,4 +1,4 @@
-# Estado de la migración
+# Verificación y Límites del Sistema
 
 Aplicación personal local en Rust y Dioxus Desktop, con SQLite. No necesita suscripción, Python, Streamlit, servidor propio ni servicios de pago para funcionar. Las consultas necesitan conexión y tokens gratuitos de las fuentes oficiales.
 

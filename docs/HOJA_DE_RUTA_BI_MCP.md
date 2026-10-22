@@ -28,7 +28,11 @@ Primero validar compatibilidad real del cliente con un prototipo aislado. Empeza
 
 Después permitir propuestas de cambios mediante comandos Rust/Serde tipados, límites de consultas, permisos por acción e historial. Revisar manualmente las mutaciones comerciales; no permitir envío autónomo ni registrar contactos que no ocurrieron.
 
-## 5. Antes de publicar en GitHub
+## 5. Soporte Móvil (iOS / iPhone)
+
+Adaptar el cliente Dioxus para ejecutarse nativamente en iOS mediante la feature `mobile` (WebKit/WKWebView). Mantener el núcleo `crates/core` compartido y diseñar vistas responsivas táctiles para iPhone, permitiendo consultar prospectos del día, revisar borradores y registrar contactos directamente desde el teléfono con perfiles de desarrollo de 7 días.
+
+## 6. Antes de publicar en GitHub
 
 Mantener la edición personal con datos y credenciales externos al repositorio. Distribuir instalaciones vacías y plantillas con marcadores: cada usuario configura sus propios tokens en Ajustes.
 
