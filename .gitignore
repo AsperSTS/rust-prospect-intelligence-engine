@@ -1,0 +1,17 @@
+/target/
+/data/
+/exports/
+.env
+.env.*
+!.env.example
+*.db*
+*.sqlite*
+*.xlsx
+*.csv
+graphify-out/
+.DS_Store
+
+/dist/
+/qa/
+/qa-data/
+dependency-metadata*.json

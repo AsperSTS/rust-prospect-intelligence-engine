@@ -1,0 +1,80 @@
+[graph]
+targets = [{ triple = "aarch64-apple-darwin" }]
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unlicense", "CC0-1.0", "BSL-1.0", "Unicode-3.0", "MPL-2.0"]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[bans.build]
+allow-build-scripts = [
+  { name = "anyhow", version = "=1.0.104" },
+  { name = "av-scenechange", version = "=0.14.1" },
+  { name = "aws-lc-rs", version = "=1.18.1" },
+  { name = "aws-lc-sys", version = "=0.45.0" },
+  { name = "cookie", version = "=0.18.2" },
+  { name = "crc32fast", version = "=1.5.2" },
+  { name = "crossbeam-deque", version = "=0.8.8" },
+  { name = "crossbeam-epoch", version = "=0.9.21" },
+  { name = "crossbeam-utils", version = "=0.8.23" },
+  { name = "dioxus-desktop", version = "=0.7.10" },
+  { name = "dioxus-document", version = "=0.7.10" },
+  { name = "dioxus-interpreter-js", version = "=0.7.10" },
+  { name = "generic-array", version = "=0.14.7" },
+  { name = "getrandom", version = "=0.3.4" },
+  { name = "getrandom", version = "=0.4.3" },
+  { name = "httparse", version = "=1.10.1" },
+  { name = "icu_normalizer_data", version = "=2.3.0" },
+  { name = "icu_properties_data", version = "=2.3.0" },
+  { name = "libc", version = "=0.2.190" },
+  { name = "libm", version = "=0.2.16" },
+  { name = "libsqlite3-sys", version = "=0.38.2" },
+  { name = "native-tls", version = "=0.2.18" },
+  { name = "num-traits", version = "=0.2.19" },
+  { name = "objc2", version = "=0.6.4" },
+  { name = "objc2-exception-helper", version = "=0.1.1" },
+  { name = "parking_lot_core", version = "=0.9.12" },
+  { name = "paste", version = "=1.0.15" },
+  { name = "proc-macro2", version = "=1.0.107" },
+  { name = "proc-macro2-diagnostics", version = "=0.10.1" },
+  { name = "pulp", version = "=0.22.3" },
+  { name = "quinn", version = "=0.11.12" },
+  { name = "quinn-udp", version = "=0.5.16" },
+  { name = "quote", version = "=1.0.47" },
+  { name = "rav1e", version = "=0.8.1" },
+  { name = "rayon-core", version = "=1.13.0" },
+  { name = "rfd", version = "=0.17.2" },
+  { name = "ring", version = "=0.17.14" },
+  { name = "rustix", version = "=1.1.5" },
+  { name = "rustls", version = "=0.23.45" },
+  { name = "rustversion", version = "=1.0.23" },
+  { name = "selectors", version = "=0.38.0" },
+  { name = "serde", version = "=1.0.229" },
+  { name = "serde_core", version = "=1.0.229" },
+  { name = "serde_json", version = "=1.0.151" },
+  { name = "signal-hook", version = "=0.3.18" },
+  { name = "slotmap", version = "=1.1.1" },
+  { name = "thiserror", version = "=2.0.21" },
+  { name = "wasm-bindgen", version = "=0.2.129" },
+  { name = "wasm-bindgen-shared", version = "=0.2.129" },
+  { name = "web_atoms", version = "=0.2.6" },
+  { name = "wry", version = "=0.53.5" },
+  { name = "zerocopy", version = "=0.8.59" },
+  { name = "zmij", version = "=1.0.23" },
+]
+executables = "deny"
+interpreted = "allow"
+enable-builtin-globs = false
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is an archived compile-time macro dependency of Dioxus Desktop image decoders. No vulnerability is alleged in this advisory; version remains locked. Review replacement in the post-migration dependency audit; do not add it as a direct application dependency." },
+]

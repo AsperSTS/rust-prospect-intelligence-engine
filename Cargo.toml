@@ -1,0 +1,11 @@
+[workspace]
+members = ["crates/core", "crates/desktop", "crates/cli"]
+resolver = "2"
+[workspace.package]
+version = "0.2.1"
+edition = "2024"
+license = "MIT"
+rust-version = "1.90"
+[profile.release]
+lto = "thin"
+strip = true

@@ -1,0 +1,36 @@
+{
+  "PROHIBIDAS": [
+    "espero que se encuentre muy bien",
+    "me pongo en contacto con usted para",
+    "somos una empresa líder",
+    "empresa líder",
+    "soluciones innovadoras de vanguardia",
+    "transformación digital integral",
+    "sin sistemas caros",
+    "ahorre tiempo y dinero",
+    "tiene 15 minutos mañana",
+    "última oportunidad",
+    "sé que está ocupado",
+    "no quiero ser insistente",
+    "solo quería dar seguimiento",
+    "solo doy seguimiento",
+    "vio mi mensaje",
+    "somos expertos",
+    "amplia experiencia",
+    "aproveche esta oportunidad",
+    "solo esta semana",
+    "llamada urgente",
+    "estuve investigando mucho",
+    "increíble trayectoria"
+  ],
+  "CLAIMS_NO_SUSTENTADOS": [
+    "\\bsé que\\b",
+    "\\bsabemos que\\b",
+    "\\bsabía que\\b",
+    "\\busan excel\\b",
+    "\\bpierden (horas|tiempo)\\b",
+    "\\btienen problemas\\b",
+    "\\bhacen reportes manuales\\b",
+    "\\btodavía (usan|pierden)\\b"
+  ]
+}

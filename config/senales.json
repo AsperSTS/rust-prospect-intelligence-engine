@@ -1,0 +1,123 @@
+{
+  "SENALES": {
+    "sobre_pedido": [
+      "(?:sobre|bajo) pedido|(?:fabric\\w+|manufactur\\w+|producci[oó]n|maquinad\\w+)\\s+(?:a|bajo)\\s+(?:la\\s+)?(?:medida|dise[ñn]o|especificaci\\w+)",
+      "fabricación sobre pedido",
+      true
+    ],
+    "cotizacion": [
+      "cotizaci[oó]n|cotizar|cotiza\\b|solicita(?:r)? (?:tu |su )?cotizaci",
+      "cotizaciones",
+      true
+    ],
+    "servicio_tecnico": [
+      "servicio t[eé]cnico|soporte t[eé]cnico",
+      "servicio técnico",
+      true
+    ],
+    "inventario": [
+      "inventarios?",
+      "inventario",
+      true
+    ],
+    "almacen": [
+      "almac[eé]n(?:es)?\\b|almacenamiento",
+      "almacén",
+      true
+    ],
+    "logistica": [
+      "log[ií]stica",
+      "logística",
+      true
+    ],
+    "distribucion": [
+      "distribuci[oó]n|distribuidor",
+      "distribución",
+      true
+    ],
+    "flotilla": [
+      "flotilla|unidades de carga|transporte de carga",
+      "flotilla o transporte de carga",
+      true
+    ],
+    "mantenimiento": [
+      "mantenimiento",
+      "mantenimiento",
+      true
+    ],
+    "entregas": [
+      "entregas? (?:a|en|nacional|puntual|a tiempo)|env[ií]os? (?:a|en|nacional)",
+      "entregas",
+      true
+    ],
+    "calidad": [
+      "control de calidad|aseguramiento de (?:la )?calidad|gesti[oó]n de (?:la )?calidad|sistema de (?:gesti[oó]n de )?calidad|inspecci[oó]n de calidad|metrolog[ií]a",
+      "control de calidad",
+      true
+    ],
+    "iso": [
+      "\\biso[ -]?(?:9001|14001|45001|\\d{4,5})\\b",
+      "certificación ISO",
+      true
+    ],
+    "produccion": [
+      "producci[oó]n|manufactura",
+      "producción",
+      true
+    ],
+    "fabricacion": [
+      "fabricaci[oó]n|fabricamos|fabricantes?",
+      "fabricación",
+      false
+    ],
+    "proveedores": [
+      "proveedores",
+      "proveedores",
+      false
+    ],
+    "proyectos": [
+      "proyectos",
+      "proyectos",
+      false
+    ],
+    "sucursales": [
+      "sucursales",
+      "sucursales",
+      false
+    ]
+  },
+  "ORDEN_OBS": [
+    "sobre_pedido",
+    "cotizacion",
+    "servicio_tecnico",
+    "inventario",
+    "logistica",
+    "almacen",
+    "flotilla",
+    "mantenimiento",
+    "distribucion",
+    "entregas",
+    "iso",
+    "calidad",
+    "produccion"
+  ],
+  "SIGNAL_ORDER": [
+    "sobre_pedido",
+    "cotizacion",
+    "servicio_tecnico",
+    "inventario",
+    "almacen",
+    "logistica",
+    "distribucion",
+    "flotilla",
+    "mantenimiento",
+    "entregas",
+    "calidad",
+    "iso",
+    "produccion",
+    "fabricacion",
+    "proveedores",
+    "proyectos",
+    "sucursales"
+  ]
+}

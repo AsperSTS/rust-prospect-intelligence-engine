@@ -1,0 +1,13 @@
+target/
+data/
+exports/
+.env
+*.db
+docs/
+*.md
+config/
+fixtures/
+qa-data/
+qa/
+dist/
+dependency-metadata*.json

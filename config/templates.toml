@@ -1,0 +1,118 @@
+# Plantillas editables. El código las lee tal cual (se recargan al guardar el archivo).
+# Variables permitidas: {nombre} {giro_corto} {cosa} {pregunta} {ejemplo} {obs} {credencial}
+# Constantes del remitente (config.py): {owner} {owner_corto} {whatsapp}
+# Reglas (se validan automáticamente): WhatsApp ≤ 65 palabras y 1 pregunta · correo ≤ 120 palabras · sin frases prohibidas.
+# {obs} solo se usa si el sitio de la empresa lo respalda con evidencia; si no hay evidencia, la variante C no se asigna.
+
+[whatsapp]
+# A — puerta de entrada: no sabemos quién decide
+A = "Hola, buen día. Soy {owner}. Vi que {nombre} trabaja en {giro_corto}. Me dedico a digitalizar y automatizar procesos para empresas. ¿Con quién podría revisar cómo llevan hoy {cosa}?"
+# B — pregunta directa: empresa bien identificada, sin evidencia web específica
+B = "Hola, buen día. Soy {owner}. Desarrollo software y automatizaciones para procesos internos. Vi a {nombre} y quería hacerles una pregunta: {pregunta}"
+# C — evidencia contextual: solo con {obs} real
+C = "Hola, buen día. Soy {owner_corto}. {obs} Me dedico a digitalizar procesos y, al verlo, me surgió una duda: {pregunta}"
+# D — credencial: cuando Audi aporta confianza al segmento
+D = "Hola, buen día. Soy {owner}. {credencial} Ahora desarrollo soluciones para procesos internos. Vi a {nombre} y quería preguntar: {pregunta}"
+
+[email]
+asunto_A = "Pregunta sobre {cosa} en {nombre}"
+asunto_B = "{cosa} en {nombre}"
+cuerpo_con_credencial = """Buen día,
+
+Soy {owner}. {credencial} Actualmente desarrollo soluciones para procesos internos.
+
+Vi a {nombre} y quería preguntarles algo sobre {cosa}:
+
+{pregunta}
+
+Si hoy les genera trabajo manual, puedo mostrarles un ejemplo sencillo de cómo podría resolverse. Si este tema corresponde a otra persona, ¿me indica con quién verlo?
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_credencial = """Buen día,
+
+Soy {owner}. Desarrollo software y automatizaciones para procesos internos.
+
+Vi a {nombre} y quería preguntarles algo sobre {cosa}:
+
+{pregunta}
+
+Si tiene sentido revisarlo, puedo mostrarles un ejemplo sencillo por este medio. Si corresponde a otra persona, ¿me indica con quién verlo?
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+
+[seguimiento]
+# D+3 — volver concreto
+d3 = """Hola nuevamente. Para aterrizar lo que comentaba, en su caso pensaba en algo como {ejemplo}.
+
+Si {cosa} hoy requiere trabajo manual, puedo enseñarle cómo se vería con un ejemplo sencillo."""
+# D+7 — reducir fricción
+d7 = """Buen día. Una forma simple de verlo sería revisar primero cómo llevan hoy {cosa} y detectar qué parte realmente valdría la pena automatizar.
+
+Si le sirve, puedo explicarle la idea por aquí mismo."""
+# D+14 — cierre limpio
+d14 = """Hola. Cierro el tema por aquí para no llenar su bandeja.
+
+Si más adelante quieren revisar {cosa} o algún proceso que esté consumiendo trabajo manual, con gusto puedo ayudarles.
+
+Saludos,
+{owner_corto}"""
+
+# Texto por giro. Preguntas abiertas: no presuponen que trabajan mal.
+[giros."Autopartes"]
+cosa = "reportes de producción y calidad"
+pregunta = "¿Cómo concentran hoy la información de producción y calidad para sus reportes?"
+ejemplo = "un tablero de producción, paros y scrap alimentado desde sus registros actuales"
+
+[giros."Equipo de transporte"]
+cosa = "seguimiento de órdenes y producción"
+pregunta = "¿Cómo hacen seguimiento al avance de cada orden desde que entra hasta que termina producción?"
+ejemplo = "una vista de órdenes abiertas, etapa actual y responsables"
+
+[giros."Metalmecánica"]
+cosa = "cotizaciones, órdenes y costos"
+pregunta = "¿Cómo controlan actualmente cotizaciones, órdenes de trabajo y costos de cada trabajo?"
+ejemplo = "un control sencillo de órdenes con etapa, materiales y costo acumulado"
+
+[giros."Manufactura"]
+cosa = "producción e inventario"
+pregunta = "¿Cómo generan actualmente sus reportes de producción e inventario?"
+ejemplo = "un reporte de producción e inventario generado desde las mismas fuentes que ya usan"
+
+[giros."Comercializadora B2B"]
+cosa = "pedidos e inventario"
+pregunta = "¿Cómo conectan actualmente pedidos, existencias y seguimiento al cliente?"
+ejemplo = "una vista única de pedidos, estatus y existencias"
+
+[giros."Transporte"]
+cosa = "viajes y costos por unidad"
+pregunta = "¿Cómo llevan el control de viajes, gastos y rentabilidad por unidad?"
+ejemplo = "un tablero de viajes, gastos y mantenimiento por unidad"
+
+[giros."Logística"]
+cosa = "entregas y costos por ruta"
+pregunta = "¿Cómo concentran el estado de las entregas y los costos de cada ruta?"
+ejemplo = "un tablero de entregas, incidencias y costo por ruta"
+
+[giros."Almacén"]
+cosa = "entradas, salidas y existencias"
+pregunta = "¿Cómo registran actualmente entradas, salidas y existencias?"
+ejemplo = "un control de movimientos y existencias en una sola vista"
+
+[giros."Constructora / contratista"]
+cosa = "costos de obra y compras"
+pregunta = "¿Cómo comparan durante la obra lo gastado contra el presupuesto?"
+ejemplo = "un tablero de costos reales contra presupuesto por obra"
+
+[giros."Taller industrial"]
+cosa = "órdenes y refacciones"
+pregunta = "¿Cómo llevan el seguimiento de las órdenes desde que entran hasta que se entregan?"
+ejemplo = "un control de órdenes, estatus y refacciones asociadas"
+
+[giros."Otro"]
+cosa = "reportes o procesos repetitivos"
+pregunta = "¿Hay algún reporte o proceso operativo que hoy requiera capturar o consolidar información manualmente?"
+ejemplo = "una automatización construida sobre los archivos y herramientas que ya usan"

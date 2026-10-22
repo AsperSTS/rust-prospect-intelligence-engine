@@ -1,0 +1,21 @@
+rules:
+  - id: own-rust-unsafe-block
+    languages: [rust]
+    message: El código propio debe conservar forbid(unsafe_code).
+    severity: ERROR
+    pattern: unsafe { ... }
+  - id: tls-verification-disabled
+    languages: [rust]
+    message: No se permite desactivar la verificación TLS.
+    severity: ERROR
+    pattern-either:
+      - pattern: $CLIENT.danger_accept_invalid_certs(true)
+      - pattern: $CLIENT.danger_accept_invalid_hostnames(true)
+  - id: dynamic-shell-execution
+    languages: [rust]
+    message: Revisar cualquier ejecución de shell en el runtime.
+    severity: ERROR
+    pattern-either:
+      - pattern: std::process::Command::new("sh")
+      - pattern: std::process::Command::new("bash")
+      - pattern: std::process::Command::new("zsh")

@@ -1,0 +1,141 @@
+{
+  "GIRO_INFO": {
+    "Autopartes": [
+      25,
+      14,
+      "podría haber fricción al consolidar información de producción y calidad para sus reportes."
+    ],
+    "Equipo de transporte": [
+      23,
+      13,
+      "podría haber fricción al dar seguimiento al avance de cada orden durante la producción."
+    ],
+    "Metalmecánica": [
+      24,
+      13,
+      "podría haber fricción al dar seguimiento a cotizaciones, órdenes de trabajo y costos de cada trabajo."
+    ],
+    "Taller industrial": [
+      22,
+      11,
+      "podría haber fricción al dar seguimiento a órdenes de servicio y refacciones."
+    ],
+    "Transporte": [
+      20,
+      12,
+      "podría haber fricción al controlar viajes, gastos y rentabilidad por unidad."
+    ],
+    "Logística": [
+      20,
+      12,
+      "podría haber fricción al concentrar el estado de las entregas y los costos de cada ruta."
+    ],
+    "Almacén": [
+      18,
+      11,
+      "podría haber fricción al registrar entradas, salidas y existencias."
+    ],
+    "Constructora / contratista": [
+      17,
+      11,
+      "podría haber fricción al comparar el gasto real de cada obra contra su presupuesto."
+    ],
+    "Comercializadora B2B": [
+      15,
+      9,
+      "podría haber fricción al conectar pedidos, existencias y seguimiento a clientes."
+    ],
+    "Manufactura": [
+      12,
+      11,
+      "podría haber fricción al consolidar reportes de producción e inventario."
+    ],
+    "Otro": [
+      8,
+      5,
+      "podría haber trabajo manual al consolidar reportes o procesos repetitivos."
+    ]
+  },
+  "PREFIJOS": {
+    "3363": [
+      "Autopartes",
+      "autopartes"
+    ],
+    "336": [
+      "Equipo de transporte",
+      "equipo de transporte"
+    ],
+    "3323": [
+      "Metalmecánica",
+      "estructuras metálicas y herrería"
+    ],
+    "3327": [
+      "Metalmecánica",
+      "maquinado de piezas metálicas"
+    ],
+    "332": [
+      "Metalmecánica",
+      "productos metálicos"
+    ],
+    "331": [
+      "Metalmecánica",
+      "industria metálica básica"
+    ],
+    "333": [
+      "Metalmecánica",
+      "maquinaria y equipo"
+    ],
+    "31": [
+      "Manufactura",
+      null
+    ],
+    "32": [
+      "Manufactura",
+      null
+    ],
+    "33": [
+      "Manufactura",
+      null
+    ],
+    "43": [
+      "Comercializadora B2B",
+      null
+    ],
+    "484": [
+      "Transporte",
+      "transporte de carga"
+    ],
+    "488": [
+      "Logística",
+      "servicios para el transporte"
+    ],
+    "492": [
+      "Logística",
+      "mensajería y paquetería"
+    ],
+    "493": [
+      "Almacén",
+      "almacenamiento y logística"
+    ],
+    "23": [
+      "Constructora / contratista",
+      "construcción"
+    ],
+    "811": [
+      "Taller industrial",
+      "reparación y mantenimiento"
+    ]
+  },
+  "BONO_COMPLEJIDAD": {
+    "3363": 6,
+    "332": 5,
+    "333": 5,
+    "336": 5,
+    "484": 4,
+    "493": 4,
+    "811": 4,
+    "488": 3,
+    "23": 3,
+    "43": 2
+  }
+}
