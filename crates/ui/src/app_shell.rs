@@ -7,5 +7,8 @@ pub fn App() -> Element {
     if services.layout == Layout::Ios {
         return rsx! { ui::App {} };
     }
-    rsx! { simple_ui::App {} }
+    rsx! {
+        style { ".simple-link,.simple-advanced-state{display:none!important;}" }
+        simple_ui::App {}
+    }
 }
