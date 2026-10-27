@@ -1,22 +1,36 @@
-# Plantillas editables. El código las lee tal cual (se recargan al guardar el archivo).
-# Variables permitidas: {nombre} {giro_corto} {cosa} {pregunta} {ejemplo} {obs} {credencial}
-# Constantes del remitente (config.py): {owner} {owner_corto} {whatsapp}
-# Reglas (se validan automáticamente): WhatsApp ≤ 65 palabras y 1 pregunta · correo ≤ 120 palabras · sin frases prohibidas.
-# {obs} solo se usa si el sitio de la empresa lo respalda con evidencia; si no hay evidencia, la variante C no se asigna.
+# Plantillas editables. El código selecciona una variante de forma determinista por prospecto.
+# Variables: {nombre} {giro_corto} {cosa} {pregunta} {ejemplo} {obs} {credencial}
+# Remitente: {owner} {owner_corto} {whatsapp}
+# Reglas: WhatsApp ≤ 65 palabras y 1 pregunta · correo ≤ 120 palabras · seguimientos ≤ 80 palabras.
+# El tono busca parecer una consulta real, no una secuencia de marketing.
 
 [whatsapp]
-# A — puerta de entrada: no sabemos quién decide
-A = "Hola, buen día. Soy {owner}. Vi que {nombre} trabaja en {giro_corto}. Trabajo con digitalización y automatización de procesos. ¿Quién lleva actualmente {cosa} con ustedes?"
-# B — pregunta directa: empresa bien identificada, sin evidencia web específica
-B = "Hola, buen día. Soy {owner}. Desarrollo herramientas para procesos internos. Vi a {nombre} y me surgió una duda: {pregunta}"
-# C — evidencia contextual: solo con {obs} real
-C = "Hola, buen día. Soy {owner_corto}. {obs} Trabajo con digitalización de procesos y me surgió una duda al verlo: {pregunta}"
-# D — credencial: cuando Audi aporta confianza al segmento
-D = "Hola, buen día. Soy {owner}. {credencial} Actualmente desarrollo soluciones para procesos internos. Estuve revisando a {nombre} y me surgió una pregunta: {pregunta}"
+A = "Hola, buen día. Soy {owner}. Estuve revisando a {nombre} y quería ubicar a la persona que ve {cosa}. ¿Con quién podría revisarlo?"
+B = "Hola, buen día. Soy {owner}. Desarrollo herramientas para procesos internos. Me encontré con {nombre} y me surgió una duda: {pregunta}"
+C = "Hola, buen día. Soy {owner_corto}. {obs} Trabajo con digitalización de procesos y quería entender algo: {pregunta}"
+D = "Hola, buen día. Soy {owner}. {credencial} Actualmente trabajo en soluciones para procesos internos. Estuve revisando a {nombre}. {pregunta}"
+E = "Buen día. Soy {owner}. Estoy contactando algunas empresas de {giro_corto} para entender cómo resuelven ciertos procesos internos. En el caso de {nombre}, {pregunta}"
+F = "Hola. Soy {owner}. Una consulta rápida sobre {nombre}: {pregunta}"
+G = "Buen día. Soy {owner}. Trabajo con software y automatización para operación interna. Antes de asumir nada sobre {nombre}, prefiero preguntar: {pregunta}"
+H = "Hola, buen día. Soy {owner}. Vi el giro de {nombre} y pensé en un proceso muy concreto: {cosa}. {pregunta}"
+I = "Buen día. Soy {owner}. No sé si este tema lo vea usted, pero quería preguntar por {cosa} en {nombre}: {pregunta}"
+J = "Hola. Soy {owner}. Estoy trabajando con soluciones sencillas para quitar trabajo repetitivo de procesos internos. Sobre {nombre}, me gustaría entender esto: {pregunta}"
 
 [email]
-asunto_A = "Consulta sobre {cosa} en {nombre}"
+asunto_A = "Consulta sobre {cosa}"
 asunto_B = "Pregunta sobre {cosa}"
+asunto_01 = "Una consulta sobre {cosa}"
+asunto_02 = "Pregunta para {nombre}"
+asunto_03 = "Sobre {cosa} en {nombre}"
+asunto_04 = "Consulta de proceso interno"
+asunto_05 = "Una pregunta operativa"
+asunto_06 = "Consulta sobre sus procesos"
+asunto_07 = "Pregunta breve sobre {cosa}"
+asunto_08 = "Sobre reportes y procesos internos"
+asunto_09 = "Consulta para el área que lleva {cosa}"
+asunto_10 = "Pregunta sobre cómo llevan {cosa}"
+
+# Compatibilidad con archivos locales anteriores.
 cuerpo_con_credencial = """Buen día,
 
 Soy {owner}. {credencial} Actualmente desarrollo soluciones para procesos internos.
@@ -44,16 +58,270 @@ Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
 
+cuerpo_con_01 = """Buen día,
+
+Soy {owner}. {credencial} Ahora desarrollo soluciones de software y automatización para procesos internos.
+
+Estuve revisando a {nombre} y me surgió una duda:
+
+{pregunta}
+
+Si esto todavía implica trabajo manual, puedo enseñarles un ejemplo sencillo aplicado a {cosa}. Si lo revisa otra persona, agradecería que me indicaran con quién verlo.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_02 = """Buen día,
+
+Mi nombre es {owner}. {credencial}
+
+Quería hacerles una consulta concreta sobre {nombre}:
+
+{pregunta}
+
+No busco asumir cómo trabajan hoy. Si hay algo que valga la pena simplificar, puedo mostrarles una alternativa sencilla por este medio.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_03 = """Buen día,
+
+Soy {owner}. {credencial} Actualmente trabajo en digitalización de procesos internos.
+
+Vi a {nombre} y pensé específicamente en {cosa}.
+
+{pregunta}
+
+Si el tema corresponde a otra persona, ¿me podrían orientar con quién revisarlo? Puedo compartir un ejemplo breve si resulta relevante.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_04 = """Buen día,
+
+Soy {owner}. Trabajé en Audi México en proyectos de digitalización y automatización. Actualmente desarrollo soluciones para operación interna.
+
+Me encontré con {nombre} y quería entender algo sobre {cosa}:
+
+{pregunta}
+
+Si les genera trabajo repetitivo, puedo mostrarles una forma sencilla de centralizarlo sin plantear un cambio grande de entrada.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_05 = """Buen día,
+
+Soy {owner}. {credencial}
+
+Estoy revisando empresas de {giro_corto} para entender mejor cómo resuelven ciertos procesos operativos. En el caso de {nombre} quería preguntar:
+
+{pregunta}
+
+Si tiene sentido conversar, puedo enviarles un ejemplo concreto. Si no es su área, con saber quién lo lleva me ayuda.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_06 = """Buen día,
+
+Soy {owner}. {credencial} Mi trabajo está enfocado en software, datos y automatización para procesos internos.
+
+Tengo una pregunta breve sobre {nombre}:
+
+{pregunta}
+
+Si hoy ya lo tienen bien resuelto, perfecto. Si hay una parte manual que quieran simplificar, puedo mostrarles un ejemplo sin compromiso por este mismo medio.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_07 = """Buen día,
+
+Soy {owner}. {credencial}
+
+Antes de enviarles una propuesta genérica prefiero entender cómo trabajan. Sobre {cosa} en {nombre}:
+
+{pregunta}
+
+Con esa información puedo decirles si realmente hay algo útil que automatizar o si no vale la pena moverlo.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_08 = """Buen día,
+
+Soy {owner}. {credencial} Actualmente desarrollo herramientas internas para hacer más simples reportes y procesos operativos.
+
+Estuve revisando a {nombre}. {pregunta}
+
+Si es un tema que les consume tiempo, puedo compartirles un ejemplo muy sencillo de cómo podría quedar. Si lo lleva otra área, ¿me indican con quién verlo?
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_09 = """Buen día,
+
+Soy {owner}. {credencial}
+
+Les escribo por una duda puntual, no para mandarles una presentación comercial:
+
+{pregunta}
+
+Si vale la pena revisarlo, puedo enseñarles un ejemplo relacionado con {cosa}. Si no aplica para ustedes, no hay problema.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_con_10 = """Buen día,
+
+Soy {owner}. {credencial} Trabajo con digitalización, datos y automatización de procesos internos.
+
+Quería entender cómo manejan {cosa} en {nombre}:
+
+{pregunta}
+
+Si hay una parte que todavía sea repetitiva, puedo mostrarles una opción sencilla. Si corresponde a alguien más, agradecería el contacto correcto.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+
+cuerpo_sin_01 = """Buen día,
+
+Soy {owner}. Desarrollo software y automatizaciones para procesos internos.
+
+Estuve revisando a {nombre} y me surgió una pregunta:
+
+{pregunta}
+
+Si este proceso les genera trabajo manual, puedo mostrarles un ejemplo sencillo por este medio. Si corresponde a otra persona, ¿me indican con quién verlo?
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_02 = """Buen día,
+
+Mi nombre es {owner}. Trabajo desarrollando herramientas internas y automatizaciones.
+
+Quería preguntar algo concreto sobre {nombre}:
+
+{pregunta}
+
+No quiero asumir cómo trabajan actualmente. Si hay algo útil que simplificar, puedo compartirles un ejemplo breve.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_03 = """Buen día,
+
+Soy {owner}. Desarrollo soluciones de software para operación, datos y reportes.
+
+Vi a {nombre} y pensé específicamente en {cosa}:
+
+{pregunta}
+
+Si el tema lo lleva otra persona, ¿me podrían indicar con quién revisarlo? Si aplica, puedo mandarles un ejemplo concreto.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_04 = """Buen día,
+
+Soy {owner}. Trabajo con digitalización y automatización de procesos internos.
+
+Tengo una consulta breve para {nombre}:
+
+{pregunta}
+
+Si hoy ya lo tienen resuelto, perfecto. Si todavía hay una parte repetitiva, puedo mostrarles una alternativa sencilla.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_05 = """Buen día,
+
+Soy {owner}. Estoy revisando empresas de {giro_corto} para entender cómo manejan algunos procesos operativos.
+
+En el caso de {nombre} quería preguntar:
+
+{pregunta}
+
+Si tiene sentido, puedo enseñarles un ejemplo relacionado con {cosa}. Si no es su área, con saber quién lo lleva me ayuda.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_06 = """Buen día,
+
+Soy {owner}. Desarrollo herramientas internas para reducir captura repetida y concentrar información.
+
+Antes de asumir nada sobre {nombre}, prefiero preguntar:
+
+{pregunta}
+
+Si hay una oportunidad real de simplificarlo, puedo mostrarles un ejemplo corto. Si no, no hay problema.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_07 = """Buen día,
+
+Soy {owner}. Trabajo en software y automatización.
+
+No quería mandarles una propuesta genérica sin entender primero el proceso. Sobre {cosa}:
+
+{pregunta}
+
+Si vale la pena revisarlo, puedo compartir una idea concreta por este mismo correo.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_08 = """Buen día,
+
+Soy {owner}. Desarrollo soluciones sencillas para reportes y procesos internos.
+
+Estuve revisando a {nombre}. {pregunta}
+
+Si esto requiere bastante trabajo manual, puedo mostrarles cómo podría centralizarse. Si lo ve otra persona, agradecería que me orientaran con quién.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_09 = """Buen día,
+
+Soy {owner}. Les escribo por una duda puntual sobre su operación:
+
+{pregunta}
+
+Trabajo desarrollando herramientas para procesos internos. Si el tema aplica, puedo enseñarles un ejemplo relacionado con {cosa}; si no aplica, no hay problema.
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+cuerpo_sin_10 = """Buen día,
+
+Soy {owner}. Desarrollo software, automatizaciones y herramientas de datos para procesos internos.
+
+Quería entender cómo llevan {cosa} en {nombre}:
+
+{pregunta}
+
+Si existe una parte repetitiva que tenga sentido simplificar, puedo mostrarles una opción sencilla. Si corresponde a otra área, ¿me indican con quién verlo?
+
+Saludos,
+{owner}
+WhatsApp: {whatsapp}"""
+
 [seguimiento]
-# D+3 — volver concreto
+# Compatibilidad con instalaciones anteriores.
 d3 = """Hola nuevamente. Pensando en lo que les comentaba, un ejemplo para su caso podría ser {ejemplo}.
 
-Si les sirve, puedo mostrarles cómo se vería sin necesidad de cambiar de entrada las herramientas que ya usan."""
-# D+7 — reducir fricción
+Si les sirve, puedo mostrarles cómo se vería sin cambiar de entrada las herramientas que ya usan."""
 d7 = """Buen día. La idea no sería cambiar todo su proceso, sino entender primero cómo llevan hoy {cosa} y ver si hay alguna parte que realmente valga la pena simplificar.
 
 Si le sirve, puedo explicarle el ejemplo por aquí mismo."""
-# D+14 — cierre limpio
 d14 = """Buen día. Cierro el tema por aquí.
 
 Si más adelante quieren revisar {cosa} o algún proceso que esté consumiendo trabajo manual, con gusto puedo ayudarles.
@@ -61,7 +329,43 @@ Si más adelante quieren revisar {cosa} o algún proceso que esté consumiendo t
 Saludos,
 {owner_corto}"""
 
-# Texto por giro. Preguntas abiertas: no presuponen que trabajan mal.
+# Primer seguimiento: aterrizar la idea sin presionar.
+d3_01 = "Hola nuevamente. Pensando en {cosa}, un ejemplo para su caso podría ser {ejemplo}. Si les sirve, puedo mostrarles cómo se vería con sus fuentes actuales."
+d3_02 = "Buen día. Retomo el correo anterior con algo más concreto: {ejemplo}. La idea sería partir de lo que ya usan y simplificar únicamente la parte que tenga sentido."
+d3_03 = "Hola. Para aterrizar mejor mi mensaje anterior, en {cosa} normalmente empezaría por un ejemplo pequeño como {ejemplo}. Si resulta útil, se escala después; no al revés."
+d3_04 = "Buen día. Quería dejar un ejemplo concreto antes de cerrar el tema: {ejemplo}. Eso permite validar si realmente aporta algo antes de pensar en un proyecto mayor."
+d3_05 = "Hola nuevamente. Mi idea no era proponerles un sistema completo de entrada. Empezaría por algo pequeño: {ejemplo}. Así pueden ver si les sirve en la operación real."
+d3_06 = "Buen día. Sobre {cosa}, podría prepararles una muestra sencilla de {ejemplo}. Si ya lo tienen cubierto, perfecto; si no, sirve para visualizar una alternativa."
+d3_07 = "Hola. Pensando en lo que les escribí, el primer paso que propondría sería {ejemplo}. Nada más grande hasta saber si realmente resuelve el problema."
+d3_08 = "Buen día. Para no dejar mi mensaje demasiado abstracto: cuando hablo de mejorar {cosa}, me refiero a algo como {ejemplo}."
+d3_09 = "Hola nuevamente. Un ejemplo práctico para {nombre} podría ser {ejemplo}. La intención sería integrarlo con el proceso actual, no obligarlos a rehacer todo."
+d3_10 = "Buen día. Solo agrego contexto al mensaje anterior: {ejemplo} sería una forma sencilla de empezar a revisar {cosa} sin convertirlo desde el inicio en un proyecto grande."
+
+# Segundo seguimiento: reducir fricción y confirmar si existe problema real.
+d7_01 = "Buen día. La idea no es cambiar todo su proceso. Primero entendería cómo llevan hoy {cosa} y solo tocaría la parte que realmente esté generando trabajo repetitivo."
+d7_02 = "Hola. Si {cosa} ya funciona bien para ustedes, no tendría sentido moverlo. Si hay alguna parte manual que quieran revisar, puedo ayudarles a identificarla primero."
+d7_03 = "Buen día. Más que venderles una plataforma, me interesa saber si existe un punto concreto de {cosa} que valga la pena simplificar. Si no existe, ahí termina la conversación."
+d7_04 = "Hola nuevamente. Podemos empezar únicamente revisando el proceso actual de {cosa}. Con eso se puede saber rápido si una automatización tendría sentido o sería innecesaria."
+d7_05 = "Buen día. No necesitarían cambiar sus herramientas de entrada. Normalmente revisaría primero cómo fluye hoy la información de {cosa} y dónde se repite trabajo."
+d7_06 = "Hola. Si quieren revisar el tema, puedo hacerlo desde el proceso que ya tienen. La intención sería conservar lo que funciona y simplificar solo una parte concreta de {cosa}."
+d7_07 = "Buen día. Para mí el punto sería muy simple: entender primero {cosa}, detectar si existe trabajo repetitivo y, solo si lo hay, proponer algo pequeño."
+d7_08 = "Hola nuevamente. No sé si {cosa} sea prioridad ahora mismo. Si lo es, puedo revisar con ustedes un ejemplo corto; si no, lo dejamos para otro momento."
+d7_09 = "Buen día. Antes de plantear cualquier desarrollo, revisaría cómo llevan hoy {cosa}. Eso evita construir algo que no necesiten."
+d7_10 = "Hola. Si todavía tiene sentido revisar {cosa}, puedo explicarles por este medio cómo abordaría el proceso actual y qué parte automatizaría primero."
+
+# Tercer seguimiento: cierre limpio, sin insistencia artificial.
+d14_01 = "Buen día. Cierro el tema por aquí. Si más adelante quieren revisar {cosa}, con gusto puedo retomarlo. Saludos, {owner_corto}."
+d14_02 = "Hola. Dejo este como último mensaje sobre el tema. Si en otro momento {cosa} se vuelve una prioridad, pueden escribirme y lo revisamos."
+d14_03 = "Buen día. No continúo llenando su bandeja. Queda mi contacto por si más adelante quieren revisar {cosa} o algún proceso similar."
+d14_04 = "Hola. Cierro esta conversación por ahora. Si después quieren ver un ejemplo relacionado con {cosa}, con gusto se los preparo."
+d14_05 = "Buen día. Dejo el tema hasta aquí. Si más adelante detectan trabajo repetitivo alrededor de {cosa}, pueden contactarme y lo revisamos desde ese punto."
+d14_06 = "Hola. No hace falta responder si ahora no es prioridad. Cierro el seguimiento y quedo disponible si después quieren revisar {cosa}."
+d14_07 = "Buen día. Este será mi último mensaje sobre {cosa}. Si en algún momento quieren retomarlo, con gusto revisamos primero el proceso actual."
+d14_08 = "Hola. Cierro el seguimiento para no insistir. Si después surge una necesidad concreta alrededor de {cosa}, pueden escribirme directamente."
+d14_09 = "Buen día. Hasta aquí dejo el tema. Mi contacto queda disponible si más adelante quieren revisar {cosa} o alguna automatización puntual."
+d14_10 = "Hola. Cierro por ahora. Si en otro momento quieren revisar una parte específica de {cosa}, con gusto puedo ayudarles. Saludos, {owner_corto}."
+
+# Texto por giro. Las preguntas no presuponen que la empresa trabaja mal.
 [giros."Autopartes"]
 cosa = "reportes de producción y calidad"
 pregunta = "¿Cómo concentran hoy la información de producción y calidad para sus reportes?"
