@@ -7,27 +7,5 @@ pub fn App() -> Element {
     if services.layout == Layout::Ios {
         return rsx! { ui::App {} };
     }
-
-    let mut advanced = use_signal(|| false);
-    if *advanced.read() {
-        rsx! {
-            style { {include_str!("shell.css")} }
-            button {
-                class:"simple-shell-return",
-                onclick:move |_|advanced.set(false),
-                "← Volver al flujo simple"
-            }
-            ui::App {}
-        }
-    } else {
-        rsx! {
-            style { {include_str!("shell.css")} }
-            simple_ui::App {}
-            button {
-                class:"simple-shell-tools",
-                onclick:move |_|advanced.set(true),
-                "Herramientas avanzadas"
-            }
-        }
-    }
+    rsx! { simple_ui::App {} }
 }
