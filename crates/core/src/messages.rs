@@ -14,6 +14,7 @@ pub struct Templates {
     pub seguimiento: BTreeMap<String, String>,
     pub giros: BTreeMap<String, BTreeMap<String, String>>,
 }
+
 impl Templates {
     pub fn source(home: &Path) -> Result<String> {
         let path = home.join("templates.toml");
@@ -23,11 +24,13 @@ impl Templates {
             include_str!("../../../config/templates.toml").into()
         })
     }
+
     pub fn load(home: &Path) -> Result<Self> {
         let t: Self = toml::from_str(&Self::source(home)?)?;
         t.validate()?;
         Ok(t)
     }
+
     pub fn save(home: &Path, source: &str) -> Result<()> {
         if source.len() > 256_000 {
             return Err(invalid("Las plantillas exceden el tamaño permitido"));
@@ -36,7 +39,9 @@ impl Templates {
         templates.validate()?;
         crate::config::write_private(&home.join("templates.toml"), source.as_bytes())
     }
+
     pub fn validate(&self) -> Result<()> {
+        // Keep the original required keys so existing local template files remain valid.
         for (map, keys) in [
             (&self.whatsapp, vec!["A", "B", "C", "D"]),
             (
@@ -50,7 +55,7 @@ impl Templates {
             ),
             (&self.seguimiento, vec!["d3", "d7", "d14"]),
         ] {
-            if keys.iter().any(|k| !map.contains_key(*k)) {
+            if keys.iter().any(|key| !map.contains_key(*key)) {
                 return Err(invalid("Faltan claves en las plantillas"));
             }
         }
@@ -58,7 +63,7 @@ impl Templates {
             || self.giros.values().any(|g| {
                 ["cosa", "pregunta", "ejemplo"]
                     .iter()
-                    .any(|k| !g.contains_key(*k))
+                    .any(|key| !g.contains_key(*key))
             })
         {
             return Err(invalid("Plantillas por giro incompletas"));
@@ -66,98 +71,130 @@ impl Templates {
         Ok(())
     }
 }
+
 pub fn clean_name(raw: &str) -> String {
     static LEGAL: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)[\s,.]+(S\.?\s?A\.?\s?P\.?\s?I\.?(\s?DE\s?C\.?\s?V\.?)?|S\.?\s?A\.?(\s?DE\s?C\.?\s?V\.?)?|S\.?\s?DE\s?R\.?\s?L\.?(\s?DE\s?C\.?\s?V\.?)?|S\.?\s?C\.?|A\.?\s?C\.?)\s*$").unwrap()
     });
     static BRANCH: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\b(?:SUCURSAL|SUC\.?)(?:\s|$)").unwrap());
-    let s = BRANCH.find(raw).map(|m| &raw[..m.start()]).unwrap_or(raw);
-    let mut s = s
+    let raw = BRANCH.find(raw).map(|m| &raw[..m.start()]).unwrap_or(raw);
+    let mut value = raw
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .trim_matches([' ', ',', '.', '-'])
         .to_owned();
     for _ in 0..3 {
-        s = LEGAL
-            .replace(&s, "")
+        value = LEGAL
+            .replace(&value, "")
             .trim_matches([' ', ',', '.', '-'])
             .into();
     }
-    let mut words = Vec::new();
-    for (i, w) in s.split(' ').enumerate() {
-        let base = w.trim_matches(['.', ',']).to_lowercase();
-        let chars = w.chars().collect::<Vec<_>>();
-        let acronym = !chars.is_empty()
-            && chars.iter().all(|c| c.is_alphabetic() && c.is_uppercase())
-            && ![
-                "san", "sur", "luz", "oro", "rio", "gas", "sol", "mar", "pan", "uno", "dos", "sin",
-                "mas", "una", "ver", "mex", "don", "doña",
-            ]
-            .contains(&base.as_str())
-            && (chars.len() <= 3
-                || (chars.len() == 4
-                    && !"AEIOU".contains(chars[0])
-                    && !"AEIOU".contains(chars[1])
-                    && ![
-                        "pl", "pr", "bl", "br", "cl", "cr", "dr", "fl", "fr", "gl", "gr", "tr",
-                        "ch", "ll", "rr",
-                    ]
-                    .contains(&base.chars().take(2).collect::<String>().as_str())));
-        let allcase = w == w.to_uppercase() || w == w.to_lowercase();
-        let shown = if i > 0
-            && [
-                "de", "del", "la", "las", "los", "el", "y", "e", "en", "para", "por", "con", "al",
-            ]
-            .contains(&base.as_str())
-        {
-            base
-        } else if acronym {
-            w.to_owned()
-        } else if allcase {
-            let mut cs = w.chars();
-            cs.next()
-                .map(|c| c.to_uppercase().collect::<String>() + &cs.as_str().to_lowercase())
-                .unwrap_or_default()
-        } else {
-            w.to_owned()
-        };
-        words.push(shown);
-    }
-    let s = words.join(" ");
-    if s.is_empty() {
+    if value.is_empty() {
         crate::rules::title(raw)
     } else {
-        s
+        crate::rules::title(&value)
     }
 }
+
 fn hash_mod(id: &str, modulus: usize) -> usize {
+    if modulus == 0 {
+        return 0;
+    }
     Sha1::digest(id.as_bytes())
         .iter()
-        .fold(0usize, |r, b| (r * 256 + usize::from(*b)) % modulus)
+        .fold(0usize, |result, byte| (result * 256 + usize::from(*byte)) % modulus)
 }
+
+fn choose_key(keys: Vec<String>, id: &str, salt: &str) -> Option<String> {
+    if keys.is_empty() {
+        return None;
+    }
+    let seed = format!("{id}:{salt}");
+    keys.get(hash_mod(&seed, keys.len())).cloned()
+}
+
+fn keys_with_prefix(map: &BTreeMap<String, String>, prefix: &str) -> Vec<String> {
+    map.keys()
+        .filter(|key| key.starts_with(prefix))
+        .cloned()
+        .collect()
+}
+
+fn whatsapp_key(t: &Templates, id: &str, evidence: bool) -> String {
+    let keys = t
+        .whatsapp
+        .keys()
+        .filter(|key| !key.contains('_'))
+        .filter(|key| evidence || key.as_str() != "C")
+        .cloned()
+        .collect::<Vec<_>>();
+    choose_key(keys, id, "whatsapp").unwrap_or_else(|| "A".into())
+}
+
+fn email_subject_key(t: &Templates, id: &str) -> String {
+    choose_key(keys_with_prefix(&t.email, "asunto_"), id, "email-subject")
+        .unwrap_or_else(|| "asunto_A".into())
+}
+
+fn email_body_key(t: &Templates, id: &str, credential: bool) -> String {
+    let prefix = if credential {
+        "cuerpo_con_"
+    } else {
+        "cuerpo_sin_"
+    };
+    choose_key(keys_with_prefix(&t.email, prefix), id, "email-body").unwrap_or_else(|| {
+        if credential {
+            "cuerpo_con_credencial".into()
+        } else {
+            "cuerpo_sin_credencial".into()
+        }
+    })
+}
+
+fn followup_key(t: &Templates, id: &str, base: &str) -> String {
+    let mut keys = t
+        .seguimiento
+        .keys()
+        .filter(|key| key.as_str() == base || key.starts_with(&format!("{base}_")))
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    choose_key(keys, id, base).unwrap_or_else(|| base.into())
+}
+
+// Kept for callers/tests that use the original public helper.
 pub fn variants(id: &str, evidence: bool) -> (String, bool, String) {
     let options = if evidence {
-        vec!["A", "B", "D", "C"]
+        vec!["A", "B", "C", "D"]
     } else {
         vec!["A", "B", "D"]
     };
     (
         options[hash_mod(id, options.len())].into(),
-        hash_mod(id, 14) < 7,
-        if hash_mod(id, 26) < 13 {
+        hash_mod(&format!("{id}:credential"), 2) == 0,
+        if hash_mod(&format!("{id}:subject"), 2) == 0 {
             "A".into()
         } else {
             "B".into()
         },
     )
 }
-fn vars(p: &Prospect, settings: &Settings, t: &Templates, obs: &str) -> BTreeMap<String, String> {
-    let g = t.giros.get(&p.giro).unwrap_or(&t.giros["Otro"]);
-    let mut v = g.clone();
-    v.insert("nombre".into(), clean_name(&p.nombre));
-    v.insert(
+
+fn vars(
+    p: &Prospect,
+    settings: &Settings,
+    templates: &Templates,
+    observation: &str,
+) -> BTreeMap<String, String> {
+    let giro = templates
+        .giros
+        .get(&p.giro)
+        .unwrap_or(&templates.giros["Otro"]);
+    let mut values = giro.clone();
+    values.insert("nombre".into(), clean_name(&p.nombre));
+    values.insert(
         "giro_corto".into(),
         if !p.giro_display.is_empty() {
             p.giro_display.clone()
@@ -167,10 +204,10 @@ fn vars(p: &Prospect, settings: &Settings, t: &Templates, obs: &str) -> BTreeMap
             "su sector".into()
         },
     );
-    v.insert("obs".into(), obs.into());
-    v.insert("credencial".into(), settings.owner_credential.clone());
-    v.insert("owner".into(), settings.owner_name.clone());
-    v.insert(
+    values.insert("obs".into(), observation.into());
+    values.insert("credencial".into(), settings.owner_credential.clone());
+    values.insert("owner".into(), settings.owner_name.clone());
+    values.insert(
         "owner_corto".into(),
         settings
             .owner_name
@@ -179,41 +216,49 @@ fn vars(p: &Prospect, settings: &Settings, t: &Templates, obs: &str) -> BTreeMap
             .unwrap_or("")
             .into(),
     );
-    v.insert(
+    values.insert(
         "whatsapp".into(),
         crate::contacts::pretty_phone(&settings.owner_whatsapp),
     );
-    v
+    values
 }
-fn render(s: &str, v: &BTreeMap<String, String>) -> String {
+
+fn render(source: &str, values: &BTreeMap<String, String>) -> String {
     static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\w+)\}").unwrap());
     PLACEHOLDER
-        .replace_all(s, |c: &Captures| {
-            v.get(&c[1]).cloned().unwrap_or_else(|| c[0].into())
+        .replace_all(source, |captures: &Captures| {
+            values
+                .get(&captures[1])
+                .cloned()
+                .unwrap_or_else(|| captures[0].into())
         })
         .trim()
         .into()
 }
+
 pub fn first(
     p: &Prospect,
     channel: &str,
     signals: &[Signal],
     settings: &Settings,
-    t: &Templates,
+    templates: &Templates,
     profile: Profile,
 ) -> Result<Message> {
     if !["whatsapp", "email"].contains(&channel) {
         return Err(invalid("Canal de plantilla inválido"));
     }
-    let obs = crate::rules::observation(signals);
-    let (letter, credential, subject_letter) = variants(&p.id, obs.is_some());
-    let v = vars(
+    let observation = crate::rules::observation(signals);
+    let values = vars(
         p,
         settings,
-        t,
-        obs.as_ref().map(|o| o.1.as_str()).unwrap_or(""),
+        templates,
+        observation
+            .as_ref()
+            .map(|item| item.1.as_str())
+            .unwrap_or(""),
     );
-    let mut m = if profile == Profile::WebMarketing {
+
+    let mut message = if profile == Profile::WebMarketing {
         let question =
             "¿Con quién podría revisar cómo reciben hoy consultas de nuevos clientes por internet?";
         if channel == "whatsapp" {
@@ -222,25 +267,22 @@ pub fn first(
                 variante: "WEB-WA-A".into(),
                 cuerpo: format!(
                     "Hola, buen día. Soy {}. Vi que {} trabaja en {}. Desarrollo sitios web y herramientas para captar clientes. {question}",
-                    v["owner"], v["nombre"], v["giro_corto"]
+                    values["owner"], values["nombre"], values["giro_corto"]
                 ),
                 asunto: String::new(),
                 problemas: vec![],
             }
         } else {
+            let subject = format!("Pregunta sobre el sitio de {}", values["nombre"]);
             Message {
                 canal: channel.into(),
                 variante: "WEB-EM-A".into(),
                 cuerpo: format!(
-                    "Buen día,\n\nSoy {}. Desarrollo sitios web y herramientas para captar clientes. Vi a {} y quería hacerles una pregunta:\n\n{question}\n\nSi tiene sentido revisarlo, puedo mostrarles un ejemplo sencillo por este medio.\n\nSaludos,\n{}\nWhatsApp: {}",
-                    v["owner"], v["nombre"], v["owner"], v["whatsapp"]
+                    "Buen día,\n\nSoy {}. Desarrollo sitios web y herramientas para captar clientes. Estuve revisando a {} y quería hacerles una pregunta:\n\n{question}\n\nSi tiene sentido revisarlo, puedo mostrarles un ejemplo sencillo por este medio.\n\nSaludos,\n{}\nWhatsApp: {}",
+                    values["owner"], values["nombre"], values["owner"], values["whatsapp"]
                 ),
-                asunto: if format!("Pregunta sobre el sitio de {}", v["nombre"])
-                    .chars()
-                    .count()
-                    <= 60
-                {
-                    format!("Pregunta sobre el sitio de {}", v["nombre"])
+                asunto: if subject.chars().count() <= 60 {
+                    subject
                 } else {
                     "Una pregunta sobre su sitio web".into()
                 },
@@ -248,68 +290,69 @@ pub fn first(
             }
         }
     } else if channel == "whatsapp" {
+        let key = whatsapp_key(templates, &p.id, observation.is_some());
         Message {
             canal: channel.into(),
-            variante: format!("WA-{letter}"),
-            cuerpo: render(&t.whatsapp[&letter], &v),
+            variante: format!("WA-{key}"),
+            cuerpo: render(&templates.whatsapp[&key], &values),
             asunto: String::new(),
             problemas: vec![],
         }
     } else {
-        let v = vars(p, settings, t, "");
-        let other = if subject_letter == "A" { "B" } else { "A" };
-        let candidates = [
-            (
-                subject_letter.clone(),
-                render(&t.email[&format!("asunto_{subject_letter}")], &v),
-            ),
-            (
-                other.into(),
-                render(&t.email[&format!("asunto_{other}")], &v),
-            ),
-            ("S".into(), format!("Pregunta sobre {}", v["nombre"])),
-            ("S".into(), "Una pregunta sobre sus procesos".into()),
-        ];
-        let (letra, subject) = candidates
-            .iter()
-            .find(|(_, s)| s.chars().count() <= 60)
-            .unwrap_or(candidates.last().unwrap())
-            .clone();
+        let credential = !settings.owner_credential.trim().is_empty()
+            && hash_mod(&format!("{}:credential", p.id), 2) == 0;
+        let subject_key = email_subject_key(templates, &p.id);
+        let body_key = email_body_key(templates, &p.id, credential);
+        let mut subject = render(&templates.email[&subject_key], &values);
+        if subject.chars().count() > 60 {
+            subject = format!("Pregunta sobre {}", values["cosa"]);
+        }
+        if subject.chars().count() > 60 {
+            subject = "Una pregunta sobre sus procesos".into();
+        }
         Message {
             canal: channel.into(),
-            variante: format!("EM-{}-{letra}", if credential { "con" } else { "sin" }),
-            cuerpo: render(
-                &t.email[if credential {
-                    "cuerpo_con_credencial"
-                } else {
-                    "cuerpo_sin_credencial"
-                }],
-                &v,
-            ),
+            variante: format!("EM-{body_key}-{subject_key}"),
+            cuerpo: render(&templates.email[&body_key], &values),
             asunto: subject,
             problemas: vec![],
         }
     };
-    m.problemas = validate(&m.cuerpo, &m.canal, &m.asunto, obs.is_some(), settings);
-    Ok(m)
+
+    message.problemas = validate(
+        &message.cuerpo,
+        &message.canal,
+        &message.asunto,
+        observation.is_some(),
+        settings,
+    );
+    Ok(message)
 }
+
 pub fn followup(
     p: &Prospect,
     step: i64,
     settings: &Settings,
-    t: &Templates,
+    templates: &Templates,
     profile: Profile,
 ) -> Message {
-    let key = match step {
+    let base = match step {
         1 => "d3",
         2 => "d7",
         _ => "d14",
     };
-    let v = vars(p, settings, t, "");
-    let text = if profile == Profile::Automatizacion {
-        render(&t.seguimiento[key], &v)
+    let values = vars(p, settings, templates, "");
+    let (text, key) = if profile == Profile::Automatizacion {
+        let key = followup_key(templates, &p.id, base);
+        (render(&templates.seguimiento[&key], &values), key)
     } else {
-        match step{1=>"Hola nuevamente. Para aterrizar la idea, podría mostrarle un ejemplo de cómo presentar sus servicios y recibir consultas en una página sencilla. Si es útil, con gusto lo revisamos por este medio.",2=>"Buen día. Una forma simple de comenzar sería revisar cómo llegan hoy sus consultas y qué información necesitan sus clientes antes de escribirles. Si le sirve, puedo explicarle la idea por aquí.",_=>"Hola. Cierro el tema por aquí para no llenar su bandeja. Si más adelante quieren revisar su sitio web o la captación de consultas, con gusto puedo ayudarles."}.into()
+        let text = match step {
+            1 => "Hola nuevamente. Para aterrizar la idea, podría mostrarle un ejemplo de cómo presentar sus servicios y recibir consultas en una página sencilla. Si es útil, con gusto lo revisamos por este medio.",
+            2 => "Buen día. Una forma simple de comenzar sería revisar cómo llegan hoy sus consultas y qué información necesitan sus clientes antes de escribirles. Si le sirve, puedo explicarle la idea por aquí.",
+            _ => "Hola. Cierro el tema por aquí para no llenar su bandeja. Si más adelante quieren revisar su sitio web o la captación de consultas, con gusto puedo ayudarles.",
+        }
+        .to_owned();
+        (text, base.into())
     };
     Message {
         canal: "seguimiento".into(),
@@ -326,6 +369,7 @@ pub fn followup(
         asunto: String::new(),
     }
 }
+
 pub fn validate(
     text: &str,
     channel: &str,
@@ -348,11 +392,12 @@ pub fn validate(
         CHECKS
             .claims
             .iter()
-            .map(|r| Regex::new(r).unwrap())
+            .map(|rule| Regex::new(rule).unwrap())
             .collect()
     });
+
     let mut errors = Vec::new();
-    let low = text.to_lowercase();
+    let lower = text.to_lowercase();
     let joined = format!("{text}{subject}");
     let variables = PLACEHOLDER
         .find_iter(&joined)
@@ -364,24 +409,25 @@ pub fn validate(
             variables.into_iter().collect::<Vec<_>>().join(", ")
         ));
     }
-    let n = text.split_whitespace().count();
+
+    let words = text.split_whitespace().count();
     let max = match channel {
         "whatsapp" => 65,
         "email" => 120,
         _ => 80,
     };
-    if n > max {
-        errors.push(format!("Demasiado largo: {n} palabras (máx. {max})"));
+    if words > max {
+        errors.push(format!("Demasiado largo: {words} palabras (máx. {max})"));
     }
-    for f in &CHECKS.prohibited {
-        if low.contains(f) {
-            errors.push(format!("Frase prohibida: «{f}»"));
+    for phrase in &CHECKS.prohibited {
+        if lower.contains(phrase) {
+            errors.push(format!("Frase prohibida: «{phrase}»"));
         }
     }
-    if CLAIMS.iter().any(|r| r.is_match(&low)) {
+    if CLAIMS.iter().any(|rule| rule.is_match(&lower)) {
         errors.push("Afirmación no sustentada sobre la empresa".into());
     }
-    if low.contains("vi en su sitio") && !evidence {
+    if lower.contains("vi en su sitio") && !evidence {
         errors.push("Cita el sitio web sin evidencia registrada".into());
     }
     if channel == "whatsapp" {
@@ -391,20 +437,22 @@ pub fn validate(
                 "Debe tener exactamente 1 pregunta (tiene {questions})"
             ));
         }
-        if low.contains("http") || low.contains("www.") {
+        if lower.contains("http") || lower.contains("www.") {
             errors.push("No incluyas enlaces en el primer mensaje".into());
         }
     }
     if channel == "email" {
-        let n = subject.chars().count();
+        let length = subject.chars().count();
         if subject.is_empty() {
             errors.push("Falta el asunto".into());
-        } else if n > 70 {
+        } else if length > 70 {
             errors.push(format!(
-                "Asunto largo: {n} caracteres (máx. 70, ideal ≤ 60)"
+                "Asunto largo: {length} caracteres (máx. 70, ideal ≤ 60)"
             ));
-        } else if n > 60 {
-            errors.push(format!("Aviso: asunto de {n} caracteres (ideal ≤ 60)"));
+        } else if length > 60 {
+            errors.push(format!(
+                "Aviso: asunto de {length} caracteres (ideal ≤ 60)"
+            ));
         }
         if text.contains('<') && text.contains('>') {
             errors.push("Contiene HTML".into());
@@ -419,6 +467,7 @@ pub fn validate(
 #[cfg(test)]
 mod editor_tests {
     use super::*;
+
     #[test]
     fn editing_templates_validates_before_replacing_the_saved_file() {
         let home = tempfile::tempdir().unwrap();
@@ -427,9 +476,28 @@ mod editor_tests {
         assert!(Templates::save(home.path(), "invalid = [").is_err());
         assert!(Templates::save(home.path(), "[whatsapp]\nA = 'incompleta'").is_err());
         assert_eq!(Templates::source(home.path()).unwrap(), original);
-        let edited = original.replace("Buen día", "Buenos días");
+        let edited = original.replace("Hola, buen día", "Buenos días");
         Templates::save(home.path(), &edited).unwrap();
         assert_eq!(Templates::source(home.path()).unwrap(), edited);
         Templates::load(home.path()).unwrap();
+    }
+
+    #[test]
+    fn bundled_templates_offer_real_message_variety() {
+        let templates: Templates = toml::from_str(include_str!("../../../config/templates.toml")).unwrap();
+        assert!(templates.whatsapp.len() >= 10);
+        assert!(keys_with_prefix(&templates.email, "asunto_").len() >= 10);
+        assert!(keys_with_prefix(&templates.email, "cuerpo_con_").len() >= 10);
+        assert!(keys_with_prefix(&templates.email, "cuerpo_sin_").len() >= 10);
+        for base in ["d3", "d7", "d14"] {
+            assert!(
+                templates
+                    .seguimiento
+                    .keys()
+                    .filter(|key| key.as_str() == base || key.starts_with(&format!("{base}_")))
+                    .count()
+                    >= 10
+            );
+        }
     }
 }
