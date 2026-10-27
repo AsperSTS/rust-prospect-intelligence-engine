@@ -15,3 +15,7 @@ graphify-out/
 /qa/
 /qa-data/
 dependency-metadata*.json
+
+/data
+/release
+/archive
