@@ -437,6 +437,7 @@ pub fn initialize(c: &mut Connection, paths: &AppPaths) -> Result<()> {
         )?;
     }
     crate::updates::initialize(&tx)?;
+    crate::workspace::initialize(&tx)?;
     tx.execute(
         "UPDATE jobs SET status='interrupted' WHERE status='running'",
         [],
@@ -663,11 +664,7 @@ pub fn list(c: &Connection, q: &Query) -> Result<Page> {
         |r| r.get::<_, i64>(0).map(|n| n as usize),
     )?;
     let size = if q.size == 0 { 60 } else { q.size };
-    let order = if q.view == View::Due {
-        "p.proximo_seguimiento,p.id"
-    } else {
-        "COALESCE(s.priority_score,p.priority_score) DESC,p.id"
-    };
+    let order = format!("{}{}", q.group.sql(), q.order.sql(q.view));
     let sql = format!(
         "SELECT p.*,COALESCE(s.fit_score,p.fit_score) AS fit_score,COALESCE(s.priority_score,p.priority_score) AS priority_score,s.analysis_json AS profile_analysis {join} WHERE {where_sql} ORDER BY {order} LIMIT ? OFFSET ?"
     );
@@ -743,6 +740,13 @@ fn summary(c: &mut Connection) -> Result<Summary> {
     Ok(out)
 }
 pub fn upsert(c: &Connection, records: &[Prospect]) -> Result<(usize, usize)> {
+    upsert_with_changes(c, records, None)
+}
+pub(crate) fn upsert_with_changes(
+    c: &Connection,
+    records: &[Prospect],
+    mut changes: Option<&mut crate::workspace::FieldChanges>,
+) -> Result<(usize, usize)> {
     let columns = &LEGACY.denue;
     let updates = columns
         .iter()
@@ -773,6 +777,19 @@ pub fn upsert(c: &Connection, records: &[Prospect]) -> Result<(usize, usize)> {
             |r| r.get(0),
         )?;
         let raw = serde_json::to_value(p)?;
+        let before = if exists && changes.is_some() {
+            Some(c.query_row(
+                &format!("SELECT {} FROM prospectos WHERE id=?", columns.join(",")),
+                [&p.id],
+                |r| {
+                    (0..columns.len())
+                        .map(|i| r.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                },
+            )?)
+        } else {
+            None
+        };
         let values = insert_cols
             .iter()
             .map(|k| match &raw[k] {
@@ -795,6 +812,33 @@ pub fn upsert(c: &Connection, records: &[Prospect]) -> Result<(usize, usize)> {
             })
             .collect::<Vec<_>>();
         let wrote = st.execute(rusqlite::params_from_iter(values))?;
+        if wrote > 0
+            && let (Some(before), Some(changes)) = (before, changes.as_deref_mut())
+        {
+            let after = c.query_row(
+                &format!("SELECT {} FROM prospectos WHERE id=?", columns.join(",")),
+                [&p.id],
+                |r| {
+                    (0..columns.len())
+                        .map(|i| r.get::<_, Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                },
+            )?;
+            let missing = |v: &Value| {
+                matches!(v, Value::Null) || matches!(v,Value::Text(s) if s.trim().is_empty())
+            };
+            let mut lost = false;
+            for ((name, old), new) in columns.iter().zip(before).zip(after) {
+                if old != new {
+                    *changes.modified.entry(name.clone()).or_default() += 1;
+                    if !missing(&old) && missing(&new) {
+                        *changes.emptied.entry(name.clone()).or_default() += 1;
+                        lost = true;
+                    }
+                }
+            }
+            changes.records_with_losses += usize::from(lost);
+        }
         new += usize::from(!exists);
         updated += if exists { wrote } else { 0 };
     }

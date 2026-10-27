@@ -1,0 +1,207 @@
+/* iOS shell: grouped lists, large titles, persistent tabs and system typography. */
+html:has(.ios-app), body:has(.ios-app) { height:100%; overflow:hidden; font:-apple-system-body; -webkit-text-size-adjust:100%; }
+.ios-app { --bg:#f2f2f7; --surface:#fff; --surface-2:#f5f5fa; --text:#1c1c1e; --muted:#606068; --border:#d7d7de; --accent:#176c62; --accent-soft:#e7f3ef; --shadow:none; position:absolute; inset:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto; height:var(--ios-height,100%); min-height:0; overflow:hidden; font-size:1rem; line-height:1.45; padding-top:var(--ios-top,env(safe-area-inset-top,0px)); padding-bottom:0; }
+.ios-app[data-theme=dark] { --bg:#000; --surface:#1c1c1e; --surface-2:#2c2c2e; --text:#f5f5f7; --muted:#b6b6bf; --border:#45454a; --accent:#8ad5c2; --accent-soft:#193a32; }
+.ios-app * { min-width:0; -webkit-tap-highlight-color:transparent; }
+.ios-app button,.ios-app summary,.ios-app a { touch-action:manipulation; }
+.ios-app button:active:not(:disabled),.ios-app a:active,.ios-app summary:active { opacity:.65; }
+.ios-app button:focus-visible,.ios-app input:focus-visible,.ios-app select:focus-visible,.ios-app textarea:focus-visible,.ios-app summary:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+.ios-app .ios-icon { width:24px; height:24px; flex:none; }
+.ios-navbar { position:relative; z-index:10; min-height:44px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:8px; padding:0 max(16px,var(--ios-right,env(safe-area-inset-right,0px))) 0 max(16px,var(--ios-left,env(safe-area-inset-left,0px))); background:var(--bg); border-bottom:1px solid var(--border); }
+.ios-wordmark { font-size:1rem; font-weight:700; color:var(--accent); letter-spacing:-.4px; }
+.ios-nav-title { font-size:1rem; font-weight:600; overflow-wrap:anywhere; text-align:center; }
+.ios-icon-button { border:0; background:transparent; color:var(--accent); min-width:44px; min-height:44px; display:inline-flex; align-items:center; justify-content:center; justify-self:end; }
+.ios-back { border:0; background:none; color:var(--accent); min-height:44px; display:flex; align-items:center; gap:2px; padding:0; text-align:left; font-size:1rem; }
+.ios-back .ios-icon { width:18px; }
+.ios-content { width:100%; max-width:960px; margin:0 auto; height:100%; min-height:0; padding:14px max(16px,var(--ios-right,env(safe-area-inset-right,0px))) 16px max(16px,var(--ios-left,env(safe-area-inset-left,0px))); overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; }
+.ios-heading { margin:0 0 14px; }
+.ios-heading .eyebrow { font-size:.6875rem; letter-spacing:1px; margin-bottom:6px; }
+.ios-heading h1 { font-size:1.75rem; line-height:1.15; letter-spacing:-.6px; margin:0; font-weight:750; overflow-wrap:anywhere; }
+.ios-profile { display:block; }
+.ios-app .ios-profile select { border:0; background:transparent; color:var(--accent); padding:0 28px 0 0; font-weight:600; max-width:100%; min-height:44px; }
+.ios-app .small,.ios-app .muted.small { font-size:.8125rem; }
+.ios-app h2 { font-size:1.0625rem; }
+.ios-app h3 { font-size:1rem; }
+.ios-app .eyebrow { font-size:.6875rem; }
+.ios-app .panel { border:0; border-radius:12px; box-shadow:none; }
+.ios-app .panel-heading { padding:16px; gap:12px; flex-wrap:wrap; }
+.ios-app .panel-heading h2 { font-size:1rem; }
+.ios-app .panel-heading select { max-width:100%; }
+.ios-app .form-body,.ios-app .context-body,.ios-app .action-body { padding:16px; max-height:none; height:auto; overflow:visible; }
+.ios-app input,.ios-app select,.ios-app textarea { font-size:1rem; max-width:100%; min-height:44px; border-radius:9px; }
+.ios-app input:not([type=checkbox]):not([type=range]),.ios-app textarea { width:100%; }
+.ios-app input[type=checkbox] { width:24px; height:24px; min-height:24px; margin:0; flex:none; }
+.ios-app input[type=range] { width:100%; }
+.ios-app label,.ios-app .form-body label,.ios-app .action-body label { font-size:.875rem; font-weight:500; gap:8px; margin-bottom:16px; }
+.ios-app .check-label { flex-direction:row; align-items:center; min-height:44px; }
+.ios-app .button,.ios-app .link-button,.ios-app .pill-button,.ios-app .icon-button { min-height:44px; white-space:normal; font-size:.9375rem; display:inline-flex; align-items:center; justify-content:center; border-radius:10px; padding:10px 14px; }
+.ios-app .primary { font-weight:600; }
+.ios-app .button.full { margin:8px 0; }
+.ios-app .link-button { justify-content:flex-start; padding:8px 0; }
+.ios-app .action-row { gap:8px; }
+.ios-app .action-row>.button { flex:1 1 140px; }
+.ios-app .badge { font-size:.75rem; white-space:normal; overflow-wrap:anywhere; padding:3px 7px; border-radius:6px; }
+.ios-app summary { min-height:44px; font-size:.9375rem; padding-block:10px; cursor:pointer; }
+.ios-app .panel-tabs { min-width:0; width:100%; border:0; padding:4px; gap:4px; border-radius:10px; background:var(--surface-2); align-self:stretch; }
+.ios-app .panel-tab { min-height:44px; white-space:normal; font-size:.8125rem; padding:8px 4px; }
+.ios-app .panel-tab.active { color:var(--text); box-shadow:0 1px 4px #0002; }
+.ios-app .ios-goals { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:12px; background:var(--surface); border-radius:12px; margin:0 0 14px; }
+.ios-app .daily-goal { display:flex; flex-direction:column; min-width:0; gap:2px; }
+.ios-app .daily-goal strong { font-size:1.125rem; }
+.ios-app .daily-goal strong span { font-size:.75rem; }
+.ios-app .daily-goal .small { font-size:.75rem; }
+.ios-app .goal-track { margin-top:4px; height:4px; }
+.ios-search { display:flex; align-items:center; gap:8px; padding:0 12px; background:var(--surface-2); border-radius:12px; border:1px solid var(--border); }
+.ios-search>.ios-icon { color:var(--muted); width:20px; }
+.ios-search .search { flex:1; display:block; }
+.ios-search .search>span { display:none; }
+.ios-app .ios-search input { background:transparent; border:0; padding:10px 0; }
+.ios-filters { margin:4px 0 8px; }
+.ios-filters>summary { font-size:.875rem; display:flex; align-items:center; gap:8px; color:var(--accent); font-weight:600; list-style:none; }
+.ios-filters>summary::-webkit-details-marker { display:none; }
+.ios-filters[open] { background:var(--surface); border-radius:12px; padding:0 12px; }
+.ios-app .saved-filters { font-size:.875rem; }
+.ios-app .saved-inner { flex-direction:column; align-items:stretch; }
+.ios-app .saved-inner input { font-size:1rem; padding:10px; }
+.ios-section-heading { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:0 4px 8px; font-size:.8125rem; color:var(--muted); }
+.ios-section-heading h2 { font-size:.8125rem; font-weight:500; }
+.ios-group { background:var(--surface); border-radius:12px; overflow:hidden; }
+.ios-prospect-row { display:flex; align-items:center; width:100%; text-align:left; border:0; border-bottom:1px solid var(--border); background:var(--surface); color:var(--text); padding:12px; gap:12px; min-height:88px; }
+.ios-prospect-row:last-child,.ios-menu-row:last-child { border-bottom:0; }
+.ios-prospect-copy { display:flex; flex:1; flex-direction:column; gap:4px; overflow-wrap:anywhere; }
+.ios-prospect-copy>strong { font-size:1rem; line-height:1.3; font-weight:600; }
+.ios-prospect-copy>.muted { font-size:.8125rem; }
+.ios-row-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:.75rem; color:var(--muted); }
+.ios-priority { display:flex; align-items:center; flex-direction:column; min-width:44px; gap:2px; }
+.ios-priority strong { font-size:1.5rem; font-weight:650; color:var(--accent); font-variant-numeric:tabular-nums; }
+.ios-priority>span { font-size:.625rem; color:var(--muted); }
+.ios-prospect-row>.ios-icon { width:12px; color:var(--muted); }
+.ios-app .pagination { border:0; font-size:.875rem; padding:12px 0 20px; gap:12px; }
+.ios-empty { padding:24px 20px; text-align:center; }
+.ios-empty>.ios-icon { width:32px; height:32px; color:var(--muted); margin-bottom:10px; }
+.ios-empty h2 { margin-bottom:8px; }
+.ios-menu-row { display:flex; gap:14px; align-items:center; padding:12px 16px; background:var(--surface); color:var(--text); border:0; border-bottom:1px solid var(--border); width:100%; text-align:left; min-height:56px; }
+.ios-menu-row>.ios-icon:first-child { color:var(--accent); }
+.ios-menu-row>span { display:flex; flex-direction:column; flex:1; gap:4px; }
+.ios-menu-row strong { font-weight:500; font-size:1rem; }
+.ios-menu-row .muted { font-size:.8125rem; }
+.ios-menu-row>.ios-icon:last-child { width:14px; color:var(--muted); }
+.ios-footnote { text-align:center; font-size:.8125rem; color:var(--muted); margin:24px 0; }
+.ios-tabbar { position:relative; z-index:20; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); padding:0 max(4px,var(--ios-right,env(safe-area-inset-right,0px))) var(--ios-bottom,env(safe-area-inset-bottom,0px)) max(4px,var(--ios-left,env(safe-area-inset-left,0px))); background:var(--surface); border-top:1px solid var(--border); }
+.ios-tab { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; min-height:49px; padding:4px 1px; border:0; background:none; color:var(--muted); font-size:.625rem; line-height:1.2; overflow-wrap:anywhere; }
+.ios-tab.active { color:var(--accent); font-weight:600; }
+.ios-tab-icon { position:relative; display:flex; }
+.ios-tab-badge { position:absolute; top:-5px; left:17px; min-width:26px; white-space:nowrap; font-size:.625rem; line-height:17px; padding:0 4px; border-radius:10px; background:var(--danger); color:#fff; font-weight:600; }
+.ios-app .toast { font-size:.9375rem; padding:12px 16px; }
+.ios-app .job-strip { display:block; font-size:.875rem; }
+.ios-app .detail-columns,.ios-app .analytics-grid,.ios-app .metrics-work>.analytics-grid,.ios-app .opportunity-grid,.ios-app .dashboard-grid,.ios-app .updates-grid,.ios-app .settings-grid,.ios-app .territory-visit { display:flex; flex-direction:column; gap:20px; min-height:0; height:auto; max-height:none; }
+.ios-app .detail-columns>.panel,.ios-app .opportunity-grid>.panel,.ios-app .dashboard-grid>.panel,.ios-app .updates-grid>.panel,.ios-app .territory-visit>.panel { width:100%; height:auto; max-height:none; }
+.ios-app .metrics-work,.ios-app .territory-work,.ios-app .settings-work,.ios-app .dashboard-work,.ios-app .updates-work { display:flex; height:auto; max-height:none; overflow:visible; gap:20px; }
+.ios-app .opportunity-list,.ios-app .opportunity-grid .form-body,.ios-app .dashboard-right,.ios-app .dashboard-candidates,.ios-app .territory-businesses,.ios-app .settings-work .settings-grid { overflow:visible; max-height:none; width:100%; }
+.ios-app .stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.ios-app .stat-card { padding:16px; border:0; border-radius:12px; }
+.ios-app .stat-card>strong { font-size:1.5rem; overflow-wrap:anywhere; }
+.ios-app .stat-card .muted { font-size:.8125rem; }
+.ios-app .stat-card .small { font-size:.75rem; }
+.ios-app .form-row,.ios-app .message-meta,.ios-app .contact-lines,.ios-app .indicator-grid,.ios-app .dashboard-money { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; }
+.ios-app .contact-lines>.link-button { grid-column:auto; }
+.ios-app .message-editor { height:auto; min-height:250px; font-size:1rem; -webkit-user-select:text; user-select:text; }
+.ios-app .company-title { font-size:1.5rem; }
+.ios-app .context-body p,.ios-app .hypothesis p,.ios-app .evidence p,.ios-app .contact-lines p { font-size:.9375rem; line-height:1.5; overflow-wrap:anywhere; }
+.ios-app .hypothesis .eyebrow,.ios-app .contact-lines strong,.ios-app .score-large span,.ios-app .size-label span { font-size:.75rem; }
+.ios-app .score-row { padding:16px 0; margin:16px 0; }
+.ios-app .score-large strong { font-size:2rem; }
+.ios-app .size-label strong { font-size:.875rem; }
+.ios-app .breakdown,.ios-app .evidence strong,.ios-app .history-entry strong,.ios-app .section-title,.ios-app .history-entry .small,.ios-app .notice p,.ios-app .notice strong { font-size:.875rem; }
+.ios-app .notice { padding:16px; }
+.ios-app .history-entry { padding:16px 0; }
+.ios-app .panel-note { padding:16px; }
+.ios-app .table-wrap,.ios-app .metrics-work .table-wrap { max-height:none; width:100%; overflow:auto; }
+.ios-app table { font-size:.875rem; }
+.ios-app td,.ios-app th { padding:14px 12px; }
+.ios-app th { position:static; font-size:.75rem; }
+.ios-app .table-name { min-height:44px; font-size:.875rem; }
+.ios-app .funnel { padding:20px 16px; }
+.ios-app .funnel-row { grid-template-columns:100px minmax(0,1fr) 40px; gap:8px; font-size:.8125rem; }
+.ios-app .territory-toolbar,.ios-app .map-footer,.ios-app .settings-save,.ios-app .entity-add { flex-wrap:wrap; }
+.ios-app .territory-toolbar>select,.ios-app .territory-toolbar>.panel-tabs { max-width:100%; width:100%; margin:0; }
+.ios-app .territory-toolbar>span,.ios-app .territory-note,.ios-app .updates-controls p { font-size:.8125rem; }
+.ios-app .street-map { height:340px; min-height:260px; flex:none; border-radius:12px; }
+.ios-app .map-zoom>.icon-button { min-width:44px; min-height:44px; }
+.ios-app .map-attribution { min-height:44px; padding:10px; }
+.ios-app .opportunity-card { padding:16px; }
+.ios-app .opportunity-card>div { flex-wrap:wrap; }
+.ios-app .opportunity-card p { font-size:.875rem; }
+.ios-app .queue-title strong,.ios-app .queue-item p,.ios-app .queue-footer { font-size:.875rem; }
+.ios-app .queue-item { padding:16px; min-height:64px; }
+.ios-app .score-chip { font-size:.875rem; }
+.ios-app .dashboard-right { gap:20px; }
+.ios-app .dashboard-goals { gap:10px; padding:16px; }
+.ios-app .dashboard-results { padding:16px; }
+.ios-app .dashboard-results strong { font-size:1.5rem; }
+.ios-app .dashboard-card-footer { padding:16px; }
+.ios-app .goals-settings,.ios-app .strata-settings { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.ios-app .settings-save { align-items:stretch; }
+.ios-app .load-status,.ios-app .empty { font-size:.9375rem; padding:24px 16px; }
+@media(min-width:700px) { .ios-content { padding-left:max(32px,var(--ios-left,env(safe-area-inset-left,0px))); padding-right:max(32px,var(--ios-right,env(safe-area-inset-right,0px))); } .ios-app .detail-columns,.ios-app .opportunity-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:start; } .ios-app .stats-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } .ios-tabbar { padding-inline:max(12%,var(--ios-left,env(safe-area-inset-left,0px)),var(--ios-right,env(safe-area-inset-right,0px))); } }
+/* The keyboard owns the lower screen while editing; keep fields unobscured. */
+.ios-app:has(textarea:focus, input:not([type=checkbox]):not([type=range]):focus) .ios-tabbar { display:none; }
+
+
+/* Clearer boundaries retain the grouped iOS hierarchy in both appearances. */
+.ios-app { --border:#c8cbd2; --outline:#c8cbd2; --page-duration:220ms; --page-easing:cubic-bezier(.22,.68,0,1); }
+.ios-app[data-theme=dark] { --border:#50515a; --outline:#50515a; }
+.ios-app .panel,.ios-app .ios-group,.ios-app .ios-goals { border:1px solid var(--outline); box-shadow:0 2px 5px #00000005; }
+.ios-app .panel-heading { background:var(--surface-2); border-bottom:1px solid var(--border); }
+.ios-app .ios-prospect-row,.ios-app .ios-menu-row { border-bottom-color:var(--border); }
+.ios-app .ios-prospect-row:last-child,.ios-app .ios-menu-row:last-child { border-bottom:0; }
+.ios-app .panel-tabs { border:1px solid var(--border); }
+.ios-app .panel-tab.active { box-shadow:0 1px 4px #0002,inset 0 0 0 1px var(--outline); }
+.ios-app button,.ios-app summary { transition:opacity 120ms ease,background-color 120ms ease,border-color 120ms ease; }
+.ios-page { animation:ios-page-in var(--page-duration) var(--page-easing) both; }
+.ios-page[data-navigation=push] { animation-name:ios-detail-in; }
+@keyframes ios-page-in { from { opacity:0; transform:translate3d(0,8px,0); } to { opacity:1; transform:translate3d(0,0,0); } }
+@keyframes ios-detail-in { from { opacity:0; transform:translate3d(16px,0,0); } to { opacity:1; transform:translate3d(0,0,0); } }
+@media(prefers-reduced-motion:reduce) { .ios-app *, .ios-app *::before, .ios-app *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+/* UIKit supplies dimensions and insets; only the middle grid row scrolls. */
+body:has(.ios-app)>#main { height:100%; overflow:hidden; }
+.ios-navbar .ios-nav-title { grid-column:2; margin:0; font-size:1rem; }
+.ios-navbar .ios-icon-button,.ios-navbar-trailing { grid-column:3; justify-self:end; }
+.ios-navbar-profile { grid-column:1 / 3; }
+.ios-navbar .ios-profile { margin:0; }
+.ios-app .ios-navbar select { font-size:.875rem; max-width:10rem; min-height:44px; }
+.ios-page-anchor { height:0; scroll-margin-top:0; }
+.ios-app .context>.panel-heading { display:none; }
+.ios-app .ios-crm-state { margin:0 0 10px; }
+/* Each task opens a page in its tab, preserving the parent panel's state. */
+.ios-section-menu { margin-bottom:16px; }
+.ios-list-tools { display:flex; align-items:center; justify-content:space-between; margin:4px 0 10px; }
+.ios-list-tools>.ios-back { font-size:.875rem; font-weight:600; }
+.ios-quick-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:16px 0; }
+.ios-quick-actions>button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:72px; border:1px solid var(--border); border-radius:10px; background:var(--accent-soft); color:var(--accent); font-size:.8125rem; font-weight:600; }
+.ios-app .actions>.panel-heading { display:none; }
+.ios-data-list { display:flex; flex-direction:column; }
+.ios-data-row { position:relative; display:flex; flex-direction:column; gap:6px; width:100%; padding:16px 36px 16px 16px; border:0; border-bottom:1px solid var(--border); background:var(--surface); color:var(--text); text-align:left; overflow-wrap:anywhere; }
+.ios-data-row:last-child { border-bottom:0; }
+.ios-data-row>.ios-icon { position:absolute; right:12px; top:calc(50% - 8px); width:16px; height:16px; color:var(--muted); }
+.ios-data-row>p { margin:0; }
+.ios-row-disclosure { display:flex; align-items:center; gap:6px; color:var(--accent); font-size:.8125rem; }
+.ios-row-disclosure>.ios-icon { width:16px; height:16px; }
+.ios-app .ios-row-disclosure>.ios-icon:last-child { margin-left:auto; }
+.ios-content:has(.ios-map-page) { overflow:hidden; }
+.ios-page:has(.ios-map-page) { height:100%; }
+.ios-app .ios-map-page,.ios-app .ios-map-page .territory-visit { height:100%; min-height:0; gap:0; }
+.ios-app .ios-map-page .map-panel { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+.ios-app .ios-map-page .street-map { height:auto; min-height:0; flex:1; border-radius:0; }
+.ios-app .ios-map-page .map-footer { flex:none; padding:8px 16px; }
+.ios-app .ios-map-page .panel-heading h2 { flex:1; }
+.ios-page[data-transition="1"][data-navigation=push] { animation-name:ios-detail-in-alt; }
+@keyframes ios-detail-in-alt { from { opacity:0; transform:translate3d(16px,0,0); } to { opacity:1; transform:translate3d(0,0,0); } }
+@media(min-width:700px) { .ios-app .ios-map-page .territory-visit { display:flex; } }
+@media(prefers-reduced-motion:reduce) { .ios-app *, .ios-app *::before, .ios-app *::after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }
+.ios-back { max-width:100%; overflow:hidden; white-space:nowrap; }
+.ios-back-label { overflow:hidden; text-overflow:ellipsis; }
+.ios-nav-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ios-app .ios-opportunity-editor .form-row { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.ios-app .settings-save>.primary { width:100%; }
+.ios-app .stat-card { border:1px solid var(--outline); }

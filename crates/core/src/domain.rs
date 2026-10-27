@@ -253,6 +253,111 @@ pub enum View {
     All,
     Clients,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryOrder {
+    #[default]
+    Automatic,
+    Priority,
+    Name,
+    Municipality,
+    Fit,
+    State,
+    Followup,
+}
+impl QueryOrder {
+    pub const ALL: [Self; 7] = [
+        Self::Automatic,
+        Self::Priority,
+        Self::Name,
+        Self::Municipality,
+        Self::Fit,
+        Self::State,
+        Self::Followup,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Automatic => "Automático",
+            Self::Priority => "Prioridad · mayor primero",
+            Self::Name => "Nombre · A–Z",
+            Self::Municipality => "Municipio · A–Z",
+            Self::Fit => "Fit · mayor primero",
+            Self::State => "Estado comercial · A–Z",
+            Self::Followup => "Seguimiento · próximo primero",
+        }
+    }
+    pub(crate) fn sql(self, view: View) -> &'static str {
+        match self {
+            Self::Automatic if view == View::Due => "p.proximo_seguimiento,p.id",
+            Self::Automatic | Self::Priority => {
+                "COALESCE(s.priority_score,p.priority_score) DESC,p.id"
+            }
+            Self::Name => "lower_unicode(p.nombre),p.id",
+            Self::Municipality => "lower_unicode(p.municipio),p.entidad,p.id",
+            Self::Fit => "COALESCE(s.fit_score,p.fit_score) DESC,p.id",
+            Self::State => "p.estado,p.id",
+            Self::Followup => {
+                "CASE WHEN COALESCE(p.proximo_seguimiento,'')='' THEN 1 ELSE 0 END,p.proximo_seguimiento,p.id"
+            }
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryGroup {
+    #[default]
+    None,
+    Entity,
+    Municipality,
+    Sector,
+}
+impl QueryGroup {
+    pub const ALL: [Self; 4] = [Self::None, Self::Entity, Self::Municipality, Self::Sector];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "Sin agrupar",
+            Self::Entity => "Entidad",
+            Self::Municipality => "Municipio",
+            Self::Sector => "Giro",
+        }
+    }
+    pub(crate) fn sql(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Entity => "p.entidad,",
+            Self::Municipality => "p.entidad,p.municipio,",
+            Self::Sector => "p.giro,",
+        }
+    }
+    pub fn key(self, p: &Prospect) -> String {
+        match self {
+            Self::None => String::new(),
+            Self::Entity => {
+                if p.entidad.is_empty() {
+                    "Sin entidad".into()
+                } else {
+                    p.entidad.clone()
+                }
+            }
+            Self::Municipality => format!(
+                "{} · {}",
+                if p.municipio.is_empty() {
+                    "Sin municipio"
+                } else {
+                    &p.municipio
+                },
+                p.entidad
+            ),
+            Self::Sector => {
+                if p.giro.is_empty() {
+                    "Sin giro".into()
+                } else {
+                    p.giro.clone()
+                }
+            }
+        }
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Query {
@@ -267,6 +372,8 @@ pub struct Query {
     pub contactable: bool,
     pub page: usize,
     pub size: usize,
+    pub order: QueryOrder,
+    pub group: QueryGroup,
 }
 impl Query {
     pub fn validate(&self) -> Result<()> {

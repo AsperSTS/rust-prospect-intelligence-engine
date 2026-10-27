@@ -1,13 +1,7 @@
 #![forbid(unsafe_code)]
-mod ui;
-mod view_cache;
 use dioxus::prelude::*;
 use prospect_core::{AppPaths, Db, Settings};
-#[derive(Clone)]
-pub struct Services {
-    pub db: Db,
-    pub settings: Settings,
-}
+use prospect_ui::{self as ui, Layout, Services};
 fn main() {
     if let Err(error) = start() {
         eprintln!("{error}");
@@ -31,7 +25,7 @@ fn main() {
 }
 fn start() -> prospect_core::Result<()> {
     let paths = AppPaths::discover()?;
-    let settings = Settings::load(&paths)?;
+    let settings = Settings::load_desktop(&paths)?;
     let db = Db::open(paths.clone())?;
     let config = dioxus::desktop::Config::new()
         .with_window(
@@ -43,7 +37,11 @@ fn start() -> prospect_core::Result<()> {
         .with_data_directory(paths.home.join("webview"));
     LaunchBuilder::desktop()
         .with_cfg(config)
-        .with_context(Services { db, settings })
+        .with_context(Services {
+            db,
+            settings,
+            layout: Layout::Desktop,
+        })
         .launch(ui::App);
     Ok(())
 }

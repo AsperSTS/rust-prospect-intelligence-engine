@@ -17,3 +17,5 @@ Aplicación personal en Rust y Dioxus Desktop. Trabajar dentro de este directori
 - Actualizar fuentes sólo por acción explícita, con los presupuestos de updates::pull_batch. No restaurar importaciones ilimitadas ni reinicio automático de segmentos completos.
 - No editar migraciones SQL ya aplicadas: RUST_SCHEMA (1) y updates::SCHEMA (2). Crear una nueva versión aditiva para cambios de esquema.
 - La apariencia vive en Ajustes y la persistencia fuera del paquete. Nunca afirmar que una consulta reciente garantiza datos publicados recientemente.
+- Distribuir sin bases, contactos ni tokens. El primer uso debe permitir configurar credenciales, elegir estados, importar y reanudar desde la interfaz, sin intervención del desarrollador ni comandos de terminal.
+- Validar aceptación e interfaz con copias aisladas de datos reales de DENUE, además del arranque vacío. Los fixtures unitarios no sustituyen esa aceptación. Verificar conteos reales por estado antes de afirmar que una ampliación territorial ya tiene datos; no usar lotes o contactos ficticios en la aceptación de entrega.

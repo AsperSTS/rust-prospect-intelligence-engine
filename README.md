@@ -10,6 +10,10 @@ Aplicación de escritorio en Rust y Dioxus Desktop para prospección B2B, califi
 - **Contacto manual:** Generación de borradores contextuales a partir de evidencia y plantillas. La aplicación no realiza envíos automáticos ni registra interacciones sin acción explícita del usuario.
 - **Métricas y oportunidades:** Control de conversiones por giro económico y seguimiento de importes presupuestados frente a cobros reales en MXN y USD.
 - **Doble perfil de oferta:** Separación de reglas, puntuaciones y borradores para *Automatización y sistemas* y *Web y marketing*, manteniendo el historial compartido por establecimiento.
+- **Expansión territorial en Desktop:** Puebla y Tlaxcala más Estado de México, Querétaro, Guanajuato, Jalisco y Nuevo León en instalaciones nuevas. En configuraciones existentes, **Ajustes → Datos → Añadir recomendados → Guardar preferencias** amplía la selección sin reemplazar otros estados ni descargar datos. [Análisis territorial y de proyectos abiertos](reports/Expansión%20territorial%20y%20mejoras.md).
+- **Vistas de trabajo en Desktop:** En **Base → Personalizar tabla**, elige columnas, su orden, agrupación, densidad y filas por página; **Vistas guardadas** conserva la presentación junto a los filtros, por oferta. Las búsquedas anteriores siguen disponibles.
+- **Cambios por lote DENUE:** **Actualizaciones** muestra los últimos veinte lotes de la oferta, con registros nuevos, modificados, sin cambios e inválidos, y el detalle de campos modificados o vaciados. Se conservan los resúmenes de páginas completas ante cancelaciones y reinicios; no se reconstruye detalle de lotes antiguos.
+- **Primer uso sin asistencia:** La distribución comienza sin registros ni tokens. Ajustes abre Fuentes cuando falta DENUE, enlaza a la guía oficial para obtener el token y permite pasar a estados/límites y descargas. **Actualizaciones → Cobertura** muestra los registros reales de cada estado y sus botones **Importar/Reanudar**, con el mismo presupuesto por clic.
 
 ## Capturas de pantalla
 
@@ -49,6 +53,14 @@ open "dist/Prospect Intelligence.app"
 
 También está disponible la imagen de disco montable en `dist/Prospect-Intelligence-0.2.1-macOS.dmg`.
 
+## Versión iOS
+
+La app móvil comparte funciones y lógica con Desktop, con listas agrupadas, ficha a pantalla completa y cinco pestañas para iPhone. Incluye ambos perfiles comerciales, CRM, oportunidades, métricas, territorios, indicadores y actualizaciones manuales. Consulta [compilación, datos reales y límites de iOS](docs/APP_IOS.md).
+
+```sh
+./scripts/bundle-ios.sh --simulator --run
+```
+
 ## Estructura del proyecto
 
 El repositorio está organizado como un workspace de Rust:
@@ -59,7 +71,9 @@ El repositorio está organizado como un workspace de Rust:
 ├── crates/
 │   ├── core/              # Dominio, almacenamiento SQLite (rusqlite), scoring y métricas
 │   ├── desktop/           # Interfaz gráfica en Dioxus Desktop
-│   └── cli/               # Interfaz de línea de comandos para gestión de datos y backups
+│   ├── cli/               # Interfaz de línea de comandos para gestión de datos y backups
+│   ├── mobile/            # Lanzador iOS
+│   └── ui/                # Paneles compartidos y navegación para iPhone
 ├── config/                # Diccionarios SCIAN, señales, reglas de scoring y plantillas
 ├── assets/                # Iconos del sistema y capturas
 ├── scripts/               # Scripts de compilación, empaquetado para macOS y utilidades

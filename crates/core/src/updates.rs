@@ -124,6 +124,18 @@ pub struct SourceStatus {
     pub last_error: String,
 }
 impl Db {
+    pub async fn entity_counts(&self) -> Result<std::collections::BTreeMap<String, usize>> {
+        self.memoized("entity-counts".into(), |c| {
+            let mut statement =
+                c.prepare("SELECT COALESCE(entidad,''),COUNT(*) FROM prospectos GROUP BY entidad")?;
+            Ok(statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+                })?
+                .collect::<std::result::Result<std::collections::BTreeMap<_, _>, _>>()?)
+        })
+        .await
+    }
     pub async fn denue_progress(
         &self,
         settings: Settings,
@@ -238,10 +250,14 @@ where
             let returned = raw.len();
             let complete = raw.len() < 200;
             let mut records = Vec::new();
+            let mut invalid_rows = 0;
             for raw in raw {
                 match crate::sources::denue_record(raw, &scope.entity) {
                     Ok(p) => records.push(p),
-                    Err(_) => control.update(|s| s.invalid += 1),
+                    Err(_) => {
+                        invalid_rows += 1;
+                        control.update(|s| s.invalid += 1);
+                    }
                 }
             }
             if returned > 0 && records.is_empty() {
@@ -252,9 +268,20 @@ where
                 return Err(invalid(message));
             }
             let count = records.len();
-            let (new, changed) = db
-                .import_page(records, scope.key.clone(), start + 200, complete)
+            let summary = db
+                .import_audited_page(
+                    records,
+                    crate::workspace::DenuePageAudit {
+                        job_id: control.snapshot().id,
+                        profile,
+                        scope: scope.key.clone(),
+                        start,
+                        invalid: invalid_rows,
+                    },
+                    complete,
+                )
                 .await?;
+            let (new, changed) = (summary.inserted, summary.updated);
             if complete {
                 db.source_result(scope.key.clone(), true, String::new())
                     .await?;
@@ -370,6 +397,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(first.snapshot().pages, 1);
+        let summaries = db
+            .denue_batch_summaries(Profile::Automatizacion)
+            .await
+            .unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, first.snapshot().id);
+        assert_eq!((summaries[0].pages, summaries[0].inserted), (1, 200));
         assert_eq!(
             db.page(Query {
                 view: crate::View::All,

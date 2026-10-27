@@ -146,7 +146,22 @@ async fn run() -> prospect_core::Result<()> {
     }
     let db = Db::open(paths.clone())?;
     let mut settings = Settings::load(&paths)?;
-    let control = JobControl::new("cli");
+    let log_job = matches!(
+        &args.command,
+        Commands::Pull { .. }
+            | Commands::Run { .. }
+            | Commands::Analizar
+            | Commands::Enriquecer { .. }
+            | Commands::Indicators { .. }
+    );
+    let kind = match &args.command {
+        Commands::Pull { .. } | Commands::Run { .. } => "DENUE · lote manual",
+        Commands::Analizar => "Reglas · análisis local",
+        Commands::Enriquecer { .. } => "Sitios · revisión manual",
+        Commands::Indicators { .. } => "Indicadores · consulta manual",
+        _ => "cli",
+    };
+    let control = JobControl::new(kind);
     let progress = control.clone();
     let monitor = tokio::spawn(async move {
         let mut last = String::new();
@@ -159,6 +174,7 @@ async fn run() -> prospect_core::Result<()> {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
+    let result: prospect_core::Result<usize> = async {
     match args.command {
         Commands::Inspect => {
             let result=db.call(|c|{prospect_core::db::verify(c)?;Ok(serde_json::json!({"integrity":"ok","legacy_version":c.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,"sqlite_version":rusqlite_version(c)?,"tables":prospect_core::db::table_counts(c)?}))}).await?;
@@ -342,8 +358,19 @@ async fn run() -> prospect_core::Result<()> {
         }
         Commands::Migrate { .. } => {}
     }
+    Ok(control.snapshot().processed)
+    }.await;
     monitor.abort();
-    Ok(())
+    if log_job {
+        control.finish(&result);
+        let logged = db.log_job(control.snapshot()).await;
+        if result.is_ok() {
+            logged?;
+        } else if let Err(error) = logged {
+            eprintln!("No se guardó el cierre del trabajo: {error}");
+        }
+    }
+    result.map(|_| ())
 }
 fn rusqlite_version(c: &mut prospect_core::db::SqliteConnection) -> prospect_core::Result<String> {
     Ok(c.query_row("SELECT sqlite_version()", [], |r| r.get(0))?)

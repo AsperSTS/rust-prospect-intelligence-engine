@@ -140,6 +140,26 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    /// Desktop starts with the expanded territory; saved selections stay intentional.
+    pub fn load_desktop(paths: &AppPaths) -> Result<Self> {
+        let mut settings = Self::load(paths)?;
+        if !paths.home.join("settings.json").exists() {
+            settings.add_desktop_expansion();
+        }
+        Ok(settings)
+    }
+    /// Add the five recommended states without replacing an existing selection.
+    pub fn add_desktop_expansion(&mut self) -> usize {
+        let added = DESKTOP_EXPANSION
+            .iter()
+            .filter(|(code, _)| !self.entities.iter().any(|current| current == code))
+            .count();
+        self.entities
+            .extend(DESKTOP_EXPANSION.iter().map(|(code, _)| (*code).to_owned()));
+        self.entities.sort();
+        self.entities.dedup();
+        added
+    }
     pub fn load(paths: &AppPaths) -> Result<Self> {
         let file = paths.home.join("settings.json");
         if !file.exists() {
@@ -278,6 +298,14 @@ pub fn now() -> String {
         .format("%Y-%m-%dT%H:%M:%S")
         .to_string()
 }
+/// A geographic pilot, not a prediction of demand or a source-update instruction.
+pub const DESKTOP_EXPANSION: &[(&str, &str)] = &[
+    ("15", "Cercanía y diversidad empresarial"),
+    ("22", "Piloto de industria y servicios en el centro"),
+    ("11", "Manufactura y proveedores del Bajío"),
+    ("14", "Comercio, servicios e industria en occidente"),
+    ("19", "Industria y servicios empresariales del norte"),
+];
 pub const ENTITIES: &[(&str, &str)] = &[
     ("01", "Aguascalientes"),
     ("02", "Baja California"),
@@ -329,6 +357,35 @@ pub fn parse_date(s: &str) -> Result<chrono::NaiveDate> {
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
+    #[test]
+    fn desktop_expansion_preserves_saved_choices_and_mobile_defaults() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = AppPaths::at(temp.path()).unwrap();
+        assert_eq!(Settings::load(&paths).unwrap().entities, vec!["21", "29"]);
+        let desktop = Settings::load_desktop(&paths).unwrap();
+        assert_eq!(
+            desktop.entities,
+            vec!["11", "14", "15", "19", "21", "22", "29"]
+        );
+        let mut settings = Settings {
+            entities: vec!["09".into(), "21".into(), "29".into()],
+            profile: "web_marketing".into(),
+            denue_pages: 2,
+            ..Default::default()
+        };
+        let before = settings.clone();
+        assert_eq!(settings.add_desktop_expansion(), 5);
+        assert_eq!(settings.add_desktop_expansion(), 0);
+        assert_eq!(settings.entities.len(), 8);
+        assert!(settings.entities.contains(&"09".into()));
+        assert_eq!(settings.profile, before.profile);
+        assert_eq!(settings.denue_pages, before.denue_pages);
+        settings.entities.retain(|e| e != "19");
+        settings.save(&paths).unwrap();
+        assert_eq!(Settings::load_desktop(&paths).unwrap(), settings);
+        assert!(!paths.db.exists());
+        assert!(!paths.home.join("credentials.env").exists());
+    }
     #[test]
     fn old_settings_load_with_defaults_and_saved_preferences_survive_restart() {
         let temp = tempfile::tempdir().unwrap();

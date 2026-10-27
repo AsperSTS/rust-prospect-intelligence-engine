@@ -139,5 +139,36 @@ pub fn mailto(email: &str, subject: &str, body: &str) -> String {
     u.query_pairs_mut()
         .append_pair("subject", subject)
         .append_pair("body", body);
+    // RFC 6068 uses percent-encoded spaces; form-style '+' becomes a literal
+    // plus in mail clients. Literal plus signs already have the %2B encoding.
+    if let Some(query) = u.query().map(|q| q.replace('+', "%20")) {
+        u.set_query(Some(&query));
+    }
     u.into()
+}
+
+#[cfg(test)]
+mod composer_tests {
+    use super::*;
+    #[test]
+    fn email_composer_preserves_draft_fields_for_native_mail_apps() {
+        let subject = "Cotización + diagnóstico & seguimiento";
+        let body = "Buen día,\n\nRevisamos ventas + inventario? & costos = 20%\nSaludos.";
+        let raw = mailto("contacto@prospect.test", subject, body);
+        assert!(!raw.contains('+'), "mailto is not form-url-encoded");
+        assert!(raw.contains("%20"));
+        assert!(raw.contains("%2B"));
+        let url = Url::parse(&raw).unwrap();
+        assert_eq!(url.scheme(), "mailto");
+        assert_eq!(url.path(), "contacto@prospect.test");
+        let pairs = url.query_pairs().collect::<Vec<_>>();
+        assert_eq!(
+            pairs.len(),
+            2,
+            "draft text cannot introduce recipients or headers"
+        );
+        assert_eq!(pairs[0], ("subject".into(), subject.into()));
+        assert_eq!(pairs[1], ("body".into(), body.into()));
+        assert!(mailto("correo inválido", subject, body).is_empty());
+    }
 }

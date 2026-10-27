@@ -15,16 +15,26 @@ pub struct Templates {
     pub giros: BTreeMap<String, BTreeMap<String, String>>,
 }
 impl Templates {
-    pub fn load(home: &Path) -> Result<Self> {
+    pub fn source(home: &Path) -> Result<String> {
         let path = home.join("templates.toml");
-        let data = if path.exists() {
+        Ok(if path.exists() {
             std::fs::read_to_string(path)?
         } else {
             include_str!("../../../config/templates.toml").into()
-        };
-        let t: Self = toml::from_str(&data)?;
+        })
+    }
+    pub fn load(home: &Path) -> Result<Self> {
+        let t: Self = toml::from_str(&Self::source(home)?)?;
         t.validate()?;
         Ok(t)
+    }
+    pub fn save(home: &Path, source: &str) -> Result<()> {
+        if source.len() > 256_000 {
+            return Err(invalid("Las plantillas exceden el tamaño permitido"));
+        }
+        let templates: Self = toml::from_str(source)?;
+        templates.validate()?;
+        crate::config::write_private(&home.join("templates.toml"), source.as_bytes())
     }
     pub fn validate(&self) -> Result<()> {
         for (map, keys) in [
@@ -404,4 +414,22 @@ pub fn validate(
         }
     }
     errors
+}
+
+#[cfg(test)]
+mod editor_tests {
+    use super::*;
+    #[test]
+    fn editing_templates_validates_before_replacing_the_saved_file() {
+        let home = tempfile::tempdir().unwrap();
+        let original = Templates::source(home.path()).unwrap();
+        Templates::save(home.path(), &original).unwrap();
+        assert!(Templates::save(home.path(), "invalid = [").is_err());
+        assert!(Templates::save(home.path(), "[whatsapp]\nA = 'incompleta'").is_err());
+        assert_eq!(Templates::source(home.path()).unwrap(), original);
+        let edited = original.replace("Buen día", "Buenos días");
+        Templates::save(home.path(), &edited).unwrap();
+        assert_eq!(Templates::source(home.path()).unwrap(), edited);
+        Templates::load(home.path()).unwrap();
+    }
 }

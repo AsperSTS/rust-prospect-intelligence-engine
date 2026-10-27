@@ -12,6 +12,7 @@ pub mod messages;
 pub mod rules;
 pub mod sources;
 pub mod updates;
+pub mod workspace;
 pub use config::{AppPaths, Settings};
 pub use db::Db;
 pub use domain::*;
