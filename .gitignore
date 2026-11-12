@@ -19,3 +19,5 @@ dependency-metadata*.json
 /data
 /release
 /archive
+AGENTS.md
+credentials.env

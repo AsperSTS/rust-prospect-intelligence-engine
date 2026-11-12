@@ -51,8 +51,6 @@ El paquete compilado para Apple Silicon se encuentra en `dist/`:
 open "dist/Prospect Intelligence.app"
 ```
 
-También está disponible la imagen de disco montable en `dist/Prospect-Intelligence-0.2.1-macOS.dmg`.
-
 ## Versión iOS
 
 La app móvil comparte funciones y lógica con Desktop, con listas agrupadas, ficha a pantalla completa y cinco pestañas para iPhone. Incluye ambos perfiles comerciales, CRM, oportunidades, métricas, territorios, indicadores y actualizaciones manuales. Consulta [compilación, datos reales y límites de iOS](docs/APP_IOS.md).
@@ -100,9 +98,8 @@ cargo fmt --all -- --check
 # Auditoría de dependencias y licencias
 cargo deny --offline --locked check
 
-# Generar bundle .app y DMG para macOS
+# Generar bundle .app para macOS
 ./scripts/bundle-macos.sh
-./scripts/package-dmg.sh
 ```
 
 ## Datos y credenciales
