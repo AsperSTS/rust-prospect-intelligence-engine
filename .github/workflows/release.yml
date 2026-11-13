@@ -12,12 +12,12 @@ permissions:
 jobs:
   precheck:
     name: Auditoría previa del repositorio y dependencias
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validar metadatos y coincidencia de versión
         id: meta
@@ -60,7 +60,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validar arquitectura Apple Silicon
         run: |
@@ -101,17 +101,29 @@ jobs:
           trap 'rm -rf "$DMG_STAGE"' EXIT
           /usr/bin/ditto "dist/Prospect Intelligence.app" "$DMG_STAGE/Prospect Intelligence.app"
           ln -s /Applications "$DMG_STAGE/Applications"
-          rm -f \
-            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.dmg" \
-            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.app.zip"
-          /usr/bin/hdiutil create \
-            -volname "Prospect Intelligence" \
-            -srcfolder "$DMG_STAGE" \
-            -ov -format UDZO \
-            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.dmg"
+          DMG_PATH="release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.dmg"
+          ZIP_PATH="release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.app.zip"
+          rm -f "$DMG_PATH" "$ZIP_PATH"
+          for attempt in 1 2 3; do
+            rm -f "$DMG_PATH"
+            if /usr/bin/hdiutil create \
+              -volname "Prospect Intelligence" \
+              -srcfolder "$DMG_STAGE" \
+              -fs HFS+ \
+              -ov -format UDZO \
+              "$DMG_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep 3
+          done
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
             "dist/Prospect Intelligence.app" \
-            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.app.zip"
+            "$ZIP_PATH"
+          sync
+          sleep 2
 
       - name: Auditoría estricta de artefactos macOS y humo CLI aislado
         run: |
@@ -126,7 +138,7 @@ jobs:
           PROSPECTOS_HOME="$TMP_HOME" dist/prospectos inspect
 
       - name: Subir artefactos macOS
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets-macos
           path: release-assets/
@@ -138,7 +150,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Instalar toolchain Rust
         uses: dtolnay/rust-toolchain@stable
@@ -183,7 +195,7 @@ jobs:
           ./scripts/verify-public-hygiene.sh --archives
 
       - name: Subir artefactos Windows
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets-windows
           path: release-assets/
@@ -192,13 +204,13 @@ jobs:
   publish-release:
     name: Publicar GitHub Release multiplataforma
     needs: [precheck, build-macos, build-windows]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Descargar artefactos compilados
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-assets-*
           path: release-assets
@@ -214,7 +226,7 @@ jobs:
           )
 
       - name: Subir suma de verificación combinada
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets-combined-${{ needs.precheck.outputs.version }}
           path: release-assets/

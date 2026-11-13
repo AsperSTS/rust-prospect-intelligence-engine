@@ -36,7 +36,19 @@ check_archives() {
         exit 1
     fi
     python3 - <<'PY'
-import os, pathlib, platform, re, subprocess, sys, tarfile, tempfile, zipfile
+import os, pathlib, platform, re, subprocess, sys, tarfile, tempfile, time, zipfile
+
+def run_hdiutil(cmd, **kwargs):
+    last_err = None
+    for attempt in range(4):
+        try:
+            return subprocess.run(cmd, check=True, **kwargs)
+        except subprocess.CalledProcessError as err:
+            last_err = err
+            if attempt == 3:
+                raise
+            time.sleep(2 * (attempt + 1))
+    raise last_err
 
 forbidden = re.compile(
     r"(^|/)(credentials\.env|\.env(\..*)?|prospectos\.db|settings\.json|templates\.toml|AGENTS\.md)$|\.(db|db-wal|db-shm|sqlite|sqlite3|xlsx|csv)$",
@@ -74,11 +86,11 @@ for archive in sorted(pathlib.Path("release-assets").iterdir()):
                 print(f"Error de firma UDIF en {archive}", file=sys.stderr)
                 sys.exit(1)
         if platform.system() == "Darwin":
-            subprocess.run(["/usr/bin/hdiutil", "verify", str(archive)], check=True)
+            run_hdiutil(["/usr/bin/hdiutil", "verify", str(archive)])
             with tempfile.TemporaryDirectory() as mnt:
                 attached = False
                 try:
-                    subprocess.run(
+                    run_hdiutil(
                         [
                             "/usr/bin/hdiutil",
                             "attach",
@@ -90,7 +102,6 @@ for archive in sorted(pathlib.Path("release-assets").iterdir()):
                             mnt,
                             str(archive),
                         ],
-                        check=True,
                         stdout=subprocess.DEVNULL,
                     )
                     attached = True
