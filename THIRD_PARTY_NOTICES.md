@@ -206,7 +206,7 @@ Fuentes oficiales: [copyright y ODbL](https://www.openstreetmap.org/copyright), 
 | libc | 0.2.190 | MIT OR Apache-2.0 | [Archivos](docs/licenses/libc-0.2.190/) |
 | libloading | 0.8.9 | ISC | [Archivos](docs/licenses/libloading-0.8.9/) |
 | libm | 0.2.16 | MIT | [Archivos](docs/licenses/libm-0.2.16/) |
-| libsqlite3-sys | 0.38.2 | MIT | [Archivos](docs/licenses/libsqlite3-sys-0.38.2/) |
+| libsqlite3-sys | 0.39.1 | MIT | [Archivos](docs/licenses/libsqlite3-sys-0.39.1/) |
 | litemap | 0.8.3 | Unicode-3.0 | [Archivos](docs/licenses/litemap-0.8.3/) |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | [Archivos](docs/licenses/lock_api-0.4.14/) |
 | log | 0.4.34 | MIT OR Apache-2.0 | [Archivos](docs/licenses/log-0.4.34/) |
@@ -301,7 +301,7 @@ Fuentes oficiales: [copyright y ODbL](https://www.openstreetmap.org/copyright), 
 | rfd | 0.17.2 | MIT | [Archivos](docs/licenses/rfd-0.17.2/) |
 | rgb | 0.8.53 | MIT | [Archivos](docs/licenses/rgb-0.8.53/) |
 | ring | 0.17.14 | Apache-2.0 AND ISC | [Archivos](docs/licenses/ring-0.17.14/) |
-| rusqlite | 0.40.2 | MIT | [Archivos](docs/licenses/rusqlite-0.40.2/) |
+| rusqlite | 0.41.1 | MIT | [Archivos](docs/licenses/rusqlite-0.41.1/) |
 | rust_xlsxwriter | 0.99.1 | MIT OR Apache-2.0 | [Archivos](docs/licenses/rust_xlsxwriter-0.99.1/) |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT | [Archivos](docs/licenses/rustc-hash-1.1.0/) |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | [Archivos](docs/licenses/rustc-hash-2.1.3/) |

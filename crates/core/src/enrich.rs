@@ -258,7 +258,11 @@ pub async fn domain(domain: &str, control: &JobControl) -> Result<Enrichment> {
             });
         }
         Ok(Some(r)) => Some(r),
-        Ok(None) => download(&format!("http://{domain}/"), control).await?,
+        // HTTPS answered without usable content: a failing HTTP fallback is "error", like an empty one.
+        Ok(None) => match download(&format!("http://{domain}/"), control).await {
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
+            other => other.ok().flatten(),
+        },
     };
     let Some((base, html)) = first else {
         return Ok(Enrichment {

@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust-macos:
+    name: Rust macOS (fmt, clippy, tests)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Caché de Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verificar higiene pública y guardia CI
+        run: |
+          ./scripts/verify-public-hygiene.sh --repo
+          ./scripts/verify-public-hygiene.sh --ci-guard
+
+      - name: Verificar formato
+        run: cargo fmt --all -- --check
+
+      - name: Ejecutar Clippy estricto
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Ejecutar pruebas del workspace
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          cargo test --locked --workspace
+
+  rust-windows:
+    name: Rust Windows x64 (fmt, clippy, tests)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Caché de Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verificar higiene pública y guardia CI
+        shell: bash
+        run: |
+          ./scripts/verify-public-hygiene.sh --repo
+          ./scripts/verify-public-hygiene.sh --ci-guard
+
+      - name: Verificar formato
+        shell: bash
+        run: cargo fmt --all -- --check
+
+      - name: Ejecutar Clippy estricto
+        shell: bash
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Ejecutar pruebas del workspace
+        shell: bash
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          cargo test --locked --workspace
+
+  ios-check:
+    name: iOS Simulator Check
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain Rust iOS
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-ios-sim
+
+      - name: Caché de Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Ejecutar Clippy para iOS Simulator
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          cargo clippy --locked --target aarch64-apple-ios-sim -p prospect-mobile -- -D warnings
+
+  dependency-audit:
+    name: Auditoría estricta de dependencias (cargo-deny y madurez)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Caché de Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Instalar cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Verificar guardia CI
+        run: ./scripts/verify-public-hygiene.sh --ci-guard
+
+      - name: Auditoría estricta cargo-deny (bans, licenses, sources, advisories)
+        run: cargo deny --locked check
+
+      - name: Poblar índice Cargo bloqueado y verificar madurez de paquetes
+        run: |
+          cargo fetch --locked
+          python3 scripts/verify_release_age.py --check

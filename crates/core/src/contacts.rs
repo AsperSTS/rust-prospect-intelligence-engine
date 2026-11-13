@@ -6,18 +6,16 @@ static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$").unwrap()
 });
 pub fn phone(raw: &str) -> String {
-    let mut digits: String = raw.chars().filter(char::is_ascii_digit).collect();
-    for prefix in ["0052", "52", "044", "045", "01"] {
-        if digits.starts_with(prefix) && digits.len() > 10 {
-            digits = digits[prefix.len()..].to_owned();
-            break;
-        }
-    }
+    let digits: String = raw.chars().filter(char::is_ascii_digit).collect();
     if digits.len() == 10 {
-        digits
-    } else {
-        String::new()
+        return digits;
     }
+    // Country code, the old mobile "1" after it, and legacy long-distance prefixes.
+    ["00521", "0052", "521", "52", "044", "045", "01"]
+        .iter()
+        .find_map(|prefix| digits.strip_prefix(prefix).filter(|rest| rest.len() == 10))
+        .map(ToOwned::to_owned)
+        .unwrap_or_default()
 }
 pub fn pretty_phone(raw: &str) -> String {
     let n = phone(raw);
@@ -170,5 +168,26 @@ mod composer_tests {
         assert_eq!(pairs[0], ("subject".into(), subject.into()));
         assert_eq!(pairs[1], ("body".into(), body.into()));
         assert!(mailto("correo inválido", subject, body).is_empty());
+    }
+
+    #[test]
+    fn mexican_mobile_prefixes_are_accepted_when_ten_digits_remain() {
+        for raw in [
+            "+52 1 222 123 4567",
+            "5212221234567",
+            "00521 222 123 4567",
+            "+52 222 123 4567",
+            "0052 2221234567",
+            "044 222 123 4567",
+            "01 222 123 4567",
+            "222 123 4567",
+        ] {
+            assert_eq!(phone(raw), "2221234567", "{raw}");
+        }
+        // Ten digits that happen to start like a prefix stay whole.
+        assert_eq!(phone("5215551234"), "5215551234");
+        for raw in ["", "12345", "52 222 123 456", "+1 415 555 01234"] {
+            assert_eq!(phone(raw), "", "{raw}");
+        }
     }
 }

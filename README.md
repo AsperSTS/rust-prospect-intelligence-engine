@@ -1,113 +1,69 @@
 # Prospect Intelligence
 
-Aplicación de escritorio en Rust y Dioxus Desktop para prospección B2B, calificación de cuentas y seguimiento comercial local. Utiliza datos públicos de INEGI (DENUE), persistencia en SQLite y reglas deterministas para priorización de contactos.
+**Español** | [English](README.en.md)
 
-## Características
+[![CI](https://github.com/AsperSTS/rust-prospect-intelligence-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/AsperSTS/rust-prospect-intelligence-engine/actions/workflows/ci.yml)
+[![Release macOS & Windows](https://github.com/AsperSTS/rust-prospect-intelligence-engine/actions/workflows/release.yml/badge.svg)](https://github.com/AsperSTS/rust-prospect-intelligence-engine/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-- **Persistencia local:** Base de datos SQLite (`prospectos.db`) en el directorio de usuario. No requiere servidores externos ni servicios de suscripción.
-- **Calificación por reglas:** Cálculo explicable de *fit* y prioridad comercial mediante configuraciones JSON auditables, sin modelos opacos.
-- **Enriquecimiento web:** Detección de señales técnicas, comerciales y de contacto en sitios web declarados por los establecimientos.
-- **Contacto manual:** Generación de borradores contextuales a partir de evidencia y plantillas. La aplicación no realiza envíos automáticos ni registra interacciones sin acción explícita del usuario.
-- **Métricas y oportunidades:** Control de conversiones por giro económico y seguimiento de importes presupuestados frente a cobros reales en MXN y USD.
-- **Doble perfil de oferta:** Separación de reglas, puntuaciones y borradores para *Automatización y sistemas* y *Web y marketing*, manteniendo el historial compartido por establecimiento.
-- **Expansión territorial en Desktop:** Puebla y Tlaxcala más Estado de México, Querétaro, Guanajuato, Jalisco y Nuevo León en instalaciones nuevas. En configuraciones existentes, **Ajustes → Datos → Añadir recomendados → Guardar preferencias** amplía la selección sin reemplazar otros estados ni descargar datos. [Análisis territorial y de proyectos abiertos](reports/Expansión%20territorial%20y%20mejoras.md).
-- **Vistas de trabajo en Desktop:** En **Base → Personalizar tabla**, elige columnas, su orden, agrupación, densidad y filas por página; **Vistas guardadas** conserva la presentación junto a los filtros, por oferta. Las búsquedas anteriores siguen disponibles.
-- **Cambios por lote DENUE:** **Actualizaciones** muestra los últimos veinte lotes de la oferta, con registros nuevos, modificados, sin cambios e inválidos, y el detalle de campos modificados o vaciados. Se conservan los resúmenes de páginas completas ante cancelaciones y reinicios; no se reconstruye detalle de lotes antiguos.
-- **Primer uso sin asistencia:** La distribución comienza sin registros ni tokens. Ajustes abre Fuentes cuando falta DENUE, enlaza a la guía oficial para obtener el token y permite pasar a estados/límites y descargas. **Actualizaciones → Cobertura** muestra los registros reales de cada estado y sus botones **Importar/Reanudar**, con el mismo presupuesto por clic.
+Herramienta local de prospección B2B para México. Convierte el padrón público del INEGI (DENUE) en una lista priorizada de clientes potenciales, con borradores de contacto y CRM integrado en SQLite.
 
-## Capturas de pantalla
+![Lista priorizada](assets/portfolio/01-today-prioritized-list.png)
 
-### Lista priorizada del día
-Flujo principal de trabajo: selección de prospectos según prioridad, desglose de evidencia web e hipótesis comercial, y edición del borrador de mensaje.
+## Qué problema resuelve
 
-![Lista priorizada del día](assets/portfolio/01-today-prioritized-list.png)
+La mayoría de las plataformas de prospección cobran suscripciones en dólares y tienen cobertura limitada fuera de EE. UU. **Prospect Intelligence** corre en tu equipo sin servidores externos y te permite:
 
-### Seguimientos
-Control de contactos con fecha de seguimiento cumplida y generación de respuestas de seguimiento.
+- **Encontrar negocios reales:** importa establecimientos del DENUE por estado y actividad económica.
+- **Priorizar a quién contactar hoy:** calcula *fit* y prioridad con reglas JSON auditables (giro, tamaño y señales detectadas en su sitio web).
+- **Preparar mensajes sin automatizar envíos:** genera borradores contextuales y abre tu cliente de correo o canal con un clic; tú revisas y envías manualmente.
+- **Llevar el seguimiento comercial:** notas, recordatorios, oportunidades en MXN/USD y métricas de conversión separadas por perfil de oferta.
 
-![Seguimientos](assets/portfolio/02-follow-ups.png)
+## Plataformas
 
-### Conversaciones abiertas
-Seguimiento de prospectos en interacción, notas de avance y actualización de etapas del CRM.
+- **macOS (Apple Silicon) y iOS:** aplicación nativa en escritorio (`Prospect Intelligence.app`) y punto de entrada móvil en desarrollo; los releases de macOS se publican en [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases).
+- **Windows (x64):** compilado, probado en CI y empaquetado como zip portable en [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases) (`ProspectIntelligence.exe` + `prospectos.exe`, aún pendiente de validación manual en hardware Windows real; requiere Microsoft Edge WebView2 Runtime, incluido en Windows 11).
 
-![Conversaciones abiertas](assets/portfolio/03-open-conversations.png)
+## Primer uso
 
-### Métricas comerciales
-Visualización del embudo de ventas, tasas de avance y comparativa por actividad económica.
+La app inicia vacía, sin datos ni credenciales. Al abrirla te guía para ingresar los tokens gratuitos (se guardan localmente en `credentials.env` con permisos `0600`; consulta [`credentials.env.example`](credentials.env.example)):
 
-![Métricas comerciales](assets/portfolio/04-commercial-metrics.png)
+| Token | Obligatorio | Uso | Registro oficial |
+|---|---|---|---|
+| `DENUE_TOKEN` | Sí | Padrón de negocios INEGI | [API DENUE](https://www.inegi.org.mx/servicios/api_denue.html) |
+| `INEGI_TOKEN` | Opcional | Indicadores económicos | [API Indicadores](https://www.inegi.org.mx/servicios/api_indicadores.html) |
+| `BANXICO_TOKEN` | Opcional | Tipo de cambio USD/MXN | [API Banxico SIE](https://www.banxico.org.mx/SieAPIRest/service/v1/token) |
 
-### Cartera de oportunidades
-Administración de propuestas comerciales con desglose independiente de importes cotizados y cobros acumulados.
+Los datos y respaldos se almacenan localmente en `~/Library/Application Support/Prospect Intelligence/`.
 
-![Cartera de oportunidades](assets/portfolio/05-opportunities.png)
+**Respaldo portátil:** en Ajustes → Tokens y fuentes, «Crear respaldo» guarda donde elijas un `.zip` con base, plantillas, ajustes y tokens (guárdalo en privado). En una instalación nueva, la primera pantalla permite «Cargar respaldo» en lugar de empezar de cero.
 
-## Ejecución en macOS
+## Para desarrolladores
 
-### Binario empaquetado
-El paquete compilado para Apple Silicon se encuentra en `dist/`:
+Workspace en **Rust** + **Dioxus** + **SQLite** (`rusqlite`):
 
-```sh
-open "dist/Prospect Intelligence.app"
-```
-
-## Versión iOS
-
-La app móvil comparte funciones y lógica con Desktop, con listas agrupadas, ficha a pantalla completa y cinco pestañas para iPhone. Incluye ambos perfiles comerciales, CRM, oportunidades, métricas, territorios, indicadores y actualizaciones manuales. Consulta [compilación, datos reales y límites de iOS](docs/APP_IOS.md).
+- `crates/core` — dominio, persistencia SQLite, cliente DENUE, scoring determinista y métricas.
+- `crates/desktop` — lanzador de escritorio (Dioxus Desktop).
+- `crates/ui` — vistas y componentes compartidos.
+- `crates/cli` — utilidades por línea de comandos y respaldos.
+- `crates/mobile` — punto de entrada para iOS (en desarrollo).
+- `config/` — reglas configurables de giros, señales web y plantillas (`giros.json`, `senales.json`, `templates.toml`).
+- `scripts/` — empaquetadores (`bundle-macos.sh`, `bundle-windows.sh`, `bundle-ios.sh`) y guardias de higiene pública (`verify-public-hygiene.sh`).
+- `legacy/` — variantes experimentales archivadas fuera del árbol activo (incluye `simple_ui`).
 
 ```sh
-./scripts/bundle-ios.sh --simulator --run
-```
-
-## Estructura del proyecto
-
-El repositorio está organizado como un workspace de Rust:
-
-```text
-.
-├── Cargo.toml             # Configuración del workspace y perfil de release
-├── crates/
-│   ├── core/              # Dominio, almacenamiento SQLite (rusqlite), scoring y métricas
-│   ├── desktop/           # Interfaz gráfica en Dioxus Desktop
-│   ├── cli/               # Interfaz de línea de comandos para gestión de datos y backups
-│   ├── mobile/            # Lanzador iOS
-│   └── ui/                # Paneles compartidos y navegación para iPhone
-├── config/                # Diccionarios SCIAN, señales, reglas de scoring y plantillas
-├── assets/                # Iconos del sistema y capturas
-├── scripts/               # Scripts de compilación, empaquetado para macOS y utilidades
-└── docs/                  # Documentación técnica, inventario de licencias y seguridad
-```
-
-## Desarrollo y verificación
-
-Comandos para compilación, pruebas y análisis estático:
-
-```sh
-# Ejecutar en modo desarrollo
+# Ejecutar en desarrollo
 cargo run --locked -p prospect-desktop
 
-# Ejecutar pruebas unitarias y de integración
+# Pruebas, lint y auditoría de dependencias
 cargo test --locked --workspace
-
-# Análisis estático estricto con Clippy
 cargo clippy --locked --workspace --all-targets -- -D warnings
-
-# Verificación de formato
 cargo fmt --all -- --check
-
-# Auditoría de dependencias y licencias
 cargo deny --offline --locked check
-
-# Generar bundle .app para macOS
-./scripts/bundle-macos.sh
 ```
 
-## Datos y credenciales
+## Contribución, seguridad y licencia
 
-- Los datos operativos, respaldos y plantillas se almacenan en `~/Library/Application Support/Prospect Intelligence/`.
-- Los tokens de consulta para APIs públicas (INEGI DENUE, Banxico SIE) se configuran en el archivo privado `credentials.env` con permisos `0600`.
-- El repositorio no almacena tokens, bases de datos comerciales reales ni exportaciones de contactos.
-
-## Licencia
-
-Distribuido bajo licencia [MIT](LICENSE). Las licencias de dependencias de terceros se detallan en [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- Cómo contribuir y checks de PR: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Reporte privado de vulnerabilidades: [SECURITY.md](SECURITY.md)
+- Licencia [MIT](LICENSE) · Dependencias de terceros: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)

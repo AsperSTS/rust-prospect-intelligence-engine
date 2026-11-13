@@ -5,8 +5,7 @@ La aplicación de escritorio ya está generada en el directorio del proyecto. Se
 ## Entregables
 
 - `dist/Prospect Intelligence.app`: aplicación compilada para Apple Silicon (arm64).
-- `dist/Prospect-Intelligence-0.2.1-macOS.dmg`: paquete para arrastrar la app a Applications.
-- `dist/Prospect-Intelligence-0.2.1-macOS.dmg.sha256`: huella de integridad del paquete.
+- Archivos de distribución sin DMG para release público (`.app.zip` y CLI `.tar.gz`, generados por CI y verificados con `SHA256SUMS.txt`).
 - `assets/app-icon.svg`: icono vectorial editable, creado para este proyecto.
 - `assets/app-icon.png`: render de 1024 px.
 - `assets/AppIcon.icns`: variantes del icono para macOS.
@@ -37,7 +36,7 @@ Contexto tiene Resumen, Evidencia e Historial. Acciones separa Mensaje, Avance y
 
 Métricas muestra resultados e importes juntos y evita grandes paneles vacíos. Territorios muestra calles reales, el marcador del negocio seleccionado, zoom, selección municipal y acceso directo a su ficha.
 
-El mapa solicita únicamente imágenes del área visible mediante HTTPS, con User-Agent propio, cuatro peticiones simultáneas y caché local de siete días. No incorpora claves, notas, mensajes ni importes en solicitudes. Las imágenes no se incluyen en la app o el DMG.
+El mapa solicita únicamente imágenes del área visible mediante HTTPS, con User-Agent propio, cuatro peticiones simultáneas y caché local de siete días. No incorpora claves, notas, mensajes ni importes en solicitudes. Las imágenes no se incluyen en la app ni en los archivos de release.
 
 La atribución se mantiene visible. Se revisó la [política de imágenes de OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/); el servicio comunitario tiene capacidad limitada y disponibilidad sin garantía. No añade una suscripción al uso personal. La auditoría legal completa continúa pendiente.
 
@@ -46,19 +45,18 @@ La atribución se mantiene visible. Se revisó la [política de imágenes de Ope
 ```sh
 ./scripts/generate-icons.sh
 ./scripts/bundle-macos.sh
-./scripts/package-dmg.sh
 ```
 
 El empaquetador usa Cargo.lock y modo offline. En un equipo de desarrollo nuevo, prepara las dependencias con `cargo fetch --locked`. Ejecutar la app compilada no requiere estas herramientas.
 
 ## Pasar de uso personal a distribución
 
-1. **Uso personal actual:** seguir validándola diariamente, conservar respaldos y publicar versiones locales. No exige servicios de pago.
-2. **Producto estable:** completar el catálogo de unidades INEGI, pruebas con más datos, errores de red y distintas versiones de macOS; mejorar recuperación desde la interfaz y almacenamiento de tokens en el llavero del sistema.
+1. **Uso personal actual:** seguir validándola diariamente, conservar respaldos y publicar versiones locales. No exige servicios de pago. Se puede compilar localmente con `--embedded-tokens` (feature `embedded-tokens`, prohibida en CI) para usar tokens propios por defecto sin distribuir el binario.
+2. **Producto estable (pendiente):** completar el catálogo de unidades INEGI, pruebas con más datos, errores de red y distintas versiones de macOS; mejorar recuperación desde la interfaz, **migrar el almacenamiento de credenciales de `credentials.env` (`0600`) a Apple Keychain en macOS e iOS** (`RUSTSEC-2026-0459` quedó resuelto al actualizar a `rusqlite 0.41.1` / `libsqlite3-sys 0.39.1`).
 3. **Distribución a otros usuarios:** terminar la auditoría legal de dependencias y fuentes, usar un identificador de aplicación propio y preparar firma Developer ID, Hardened Runtime y notarización. Apple documenta este proceso en [Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 4. **Actualizaciones:** preparar releases verificables y un canal de descarga; añadir actualizador firmado cuando la aplicación se distribuya fuera del proyecto.
 
-Esta compilación usa firma ad hoc local y no está notarizada. El DMG facilita instalarla, pero no sustituye la confianza de Developer ID para distribución externa. No se desactivan las protecciones de macOS.
+Esta compilación usa firma ad hoc local y no está notarizada. El archivo `.zip` facilita descargar e instalar la app, pero no sustituye la confianza de Developer ID para distribución externa. No se desactivan las protecciones de macOS.
 
 Apple indica una membresía de 99 USD por año, o equivalente local, para su programa: [Apple Developer Program](https://developer.apple.com/programs/enroll/). El funcionamiento local de esta app sigue siendo gratuito. No se ha comprado una membresía ni enviado el paquete a Apple.
 

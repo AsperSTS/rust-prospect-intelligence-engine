@@ -80,42 +80,47 @@ fn current_outreach_templates_are_deterministic_and_valid() {
                 "{channel} must be deterministic for case {i}"
             );
             assert!(
-                first.problemas.iter().all(|problem| problem.starts_with("Aviso:")),
+                first
+                    .problemas
+                    .iter()
+                    .all(|problem| problem.starts_with("Aviso:")),
                 "{channel} case {i} produced invalid copy: {:?}",
                 first.problemas
             );
-            assert!(!first.cuerpo.trim().is_empty(), "{channel} case {i} is empty");
+            assert!(
+                !first.cuerpo.trim().is_empty(),
+                "{channel} case {i} is empty"
+            );
             if channel == "email" {
-                assert!(!first.asunto.trim().is_empty(), "email case {i} has no subject");
+                assert!(
+                    !first.asunto.trim().is_empty(),
+                    "email case {i} has no subject"
+                );
             }
         }
 
         for step in 1..=3 {
-            let first = messages::followup(
-                &p,
-                step,
-                &settings,
-                &templates,
-                Profile::Automatizacion,
-            );
-            let second = messages::followup(
-                &p,
-                step,
-                &settings,
-                &templates,
-                Profile::Automatizacion,
-            );
+            let first =
+                messages::followup(&p, step, &settings, &templates, Profile::Automatizacion);
+            let second =
+                messages::followup(&p, step, &settings, &templates, Profile::Automatizacion);
             assert_eq!(
                 serde_json::to_value(&first).unwrap(),
                 serde_json::to_value(&second).unwrap(),
                 "followup case {i}/{step} must be deterministic"
             );
             assert!(
-                first.problemas.iter().all(|problem| problem.starts_with("Aviso:")),
+                first
+                    .problemas
+                    .iter()
+                    .all(|problem| problem.starts_with("Aviso:")),
                 "followup case {i}/{step} produced invalid copy: {:?}",
                 first.problemas
             );
-            assert!(!first.cuerpo.trim().is_empty(), "followup case {i}/{step} is empty");
+            assert!(
+                !first.cuerpo.trim().is_empty(),
+                "followup case {i}/{step} is empty"
+            );
         }
     }
 }

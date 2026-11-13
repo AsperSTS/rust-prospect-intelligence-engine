@@ -498,6 +498,23 @@ pub fn priority(
     }
     (total, items, false)
 }
+/// The web offer's fit has one part tied to CRM state; keep it current after a CRM change.
+/// Returns whether the stored analysis changed.
+pub fn refresh_fit(profile: Profile, p: &Prospect, a: &mut Analysis) -> bool {
+    if profile != Profile::WebMarketing {
+        return false;
+    }
+    let Some(item) = a.fit_breakdown.iter_mut().find(|i| i.clave == "estado") else {
+        return false;
+    };
+    let pts = if p.estado != "nuevo" { item.maximum } else { 0 };
+    if item.pts == pts {
+        return false;
+    }
+    item.pts = pts;
+    a.fit_score = a.fit_breakdown.iter().map(|i| i.pts).sum();
+    true
+}
 pub fn next_action(p: &Prospect, fit: i64, evidence: bool, today: NaiveDate) -> Action {
     let email = !p.email().is_empty();
     let tel = !p.phone().is_empty();

@@ -170,7 +170,7 @@ async fn batch_import_and_cancelled_analysis_are_atomic() {
     let mut invalid = record("3");
     invalid.nombre.clear();
     assert!(db.import_records(vec![record("2"), invalid]).await.is_err());
-    assert_eq!(db.summary().await.unwrap().total, 1);
+    assert_eq!(db.summary(Profile::Automatizacion).await.unwrap().total, 1);
     let job = JobControl::new("test");
     job.token.cancel();
     assert!(db.analyze(settings(), job).await.is_err());

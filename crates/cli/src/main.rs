@@ -180,7 +180,7 @@ async fn run() -> prospect_core::Result<()> {
             let result=db.call(|c|{prospect_core::db::verify(c)?;Ok(serde_json::json!({"integrity":"ok","legacy_version":c.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,"sqlite_version":rusqlite_version(c)?,"tables":prospect_core::db::table_counts(c)?}))}).await?;
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
-        Commands::Daily => println!("{}", serde_json::to_string_pretty(&db.summary().await?)?),
+        Commands::Daily => println!("{}", serde_json::to_string_pretty(&db.summary(Profile::Automatizacion).await?)?),
         Commands::Analizar => {
             println!(
                 "Analizados: {}",

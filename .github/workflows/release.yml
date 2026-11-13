@@ -1,0 +1,254 @@
+name: Release macOS & Windows
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  precheck:
+    name: Auditoría previa del repositorio y dependencias
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar metadatos y coincidencia de versión
+        id: meta
+        run: |
+          VERSION=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml)
+          case "$VERSION" in
+            ''|*[!0-9.]*) echo "Versión inválida en Cargo.toml: $VERSION" >&2; exit 1 ;;
+          esac
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "El tag ($GITHUB_REF_NAME) no coincide con la versión de Cargo.toml (v$VERSION)" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verificar higiene pública y guardia CI
+        run: |
+          ./scripts/verify-public-hygiene.sh --repo
+          ./scripts/verify-public-hygiene.sh --ci-guard
+
+      - name: Instalar toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Caché de Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Instalar cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Auditoría estricta cargo-deny
+        run: cargo deny --locked check
+
+      - name: Poblar índice Cargo bloqueado y verificar madurez de paquetes
+        run: |
+          cargo fetch --locked
+          python3 scripts/verify_release_age.py --check
+
+  build-macos:
+    name: Build & Package macOS (arm64)
+    needs: precheck
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar arquitectura Apple Silicon
+        run: |
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "Se esperaba runner Apple Silicon (arm64); recibido: $(uname -m)" >&2
+            exit 1
+          fi
+
+      - name: Instalar toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Caché de Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verificar formato, Clippy, guardia CI y pruebas
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          ./scripts/verify-public-hygiene.sh --ci-guard
+          cargo fmt --all -- --check
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked --workspace
+
+      - name: Preparar dependencias offline bloqueadas
+        run: cargo fetch --locked
+
+      - name: Compilar bundle macOS limpio (sin credenciales ni DMG)
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          ./scripts/bundle-macos.sh
+
+      - name: Empaquetar artefactos macOS
+        run: |
+          VERSION="${{ needs.precheck.outputs.version }}"
+          mkdir -p release-assets
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
+            "dist/Prospect Intelligence.app" \
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.zip"
+          /usr/bin/tar -czf \
+            "release-assets/prospectos-${VERSION}-macOS-arm64.tar.gz" \
+            -C dist prospectos \
+            -C "$PWD" LICENSE THIRD_PARTY_NOTICES.md
+
+      - name: Auditoría estricta de artefactos macOS y humo CLI aislado
+        run: |
+          ./scripts/verify-public-hygiene.sh --dist
+          /usr/bin/otool -L "dist/Prospect Intelligence.app/Contents/MacOS/ProspectIntelligence"
+          if /usr/bin/otool -L "dist/Prospect Intelligence.app/Contents/MacOS/ProspectIntelligence" | grep -E '/Users/|/opt/homebrew/|/usr/local/' >/dev/null; then
+            echo "Error: se detectaron dependencias dinámicas no portables en el binario." >&2
+            exit 1
+          fi
+          TMP_HOME=$(mktemp -d)
+          trap 'rm -rf "$TMP_HOME"' EXIT
+          PROSPECTOS_HOME="$TMP_HOME" dist/prospectos inspect
+
+      - name: Subir artefactos macOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-macos
+          path: release-assets/
+          retention-days: 14
+
+  build-windows:
+    name: Build & Package Windows (x64)
+    needs: precheck
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar toolchain Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Caché de Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verificar formato, Clippy, guardia CI y pruebas en Windows
+        shell: bash
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          ./scripts/verify-public-hygiene.sh --ci-guard
+          cargo fmt --all -- --check
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked --workspace
+
+      - name: Compilar binarios Windows limpios (sin credenciales)
+        shell: bash
+        run: |
+          unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
+          ./scripts/bundle-windows.sh
+
+      - name: Prueba de humo CLI en PROSPECTOS_HOME aislado
+        shell: bash
+        run: |
+          TMP_HOME=$(mktemp -d)
+          trap 'rm -rf "$TMP_HOME"' EXIT
+          PROSPECTOS_HOME="$TMP_HOME" ./dist/windows/cli/prospectos.exe inspect
+
+      - name: Empaquetar artefactos Windows (.zip) y verificar higiene
+        shell: bash
+        run: |
+          VERSION="${{ needs.precheck.outputs.version }}"
+          mkdir -p release-assets
+          python3 - <<PY
+          import pathlib, zipfile
+
+          version = "${VERSION}"
+          def pack_dir(src_dir, archive_path, arc_prefix):
+              src = pathlib.Path(src_dir)
+              with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                  for item in sorted(src.rglob("*")):
+                      if item.is_file():
+                          rel = item.relative_to(src).as_posix()
+                          zf.write(item, f"{arc_prefix}/{rel}")
+
+          pack_dir("dist/windows/app", f"release-assets/Prospect-Intelligence-{version}-Windows-x64.zip", "Prospect Intelligence")
+          pack_dir("dist/windows/cli", f"release-assets/prospectos-{version}-Windows-x64.zip", f"prospectos-{version}-Windows-x64")
+          PY
+          ./scripts/verify-public-hygiene.sh --archives
+
+      - name: Subir artefactos Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-windows
+          path: release-assets/
+          retention-days: 14
+
+  publish-release:
+    name: Publicar GitHub Release multiplataforma
+    needs: [precheck, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar artefactos compilados
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verificar higiene de archivos y calcular SHA-256
+        run: |
+          ./scripts/verify-public-hygiene.sh --archives
+          (
+            cd release-assets
+            sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+            cat SHA256SUMS.txt
+          )
+
+      - name: Subir suma de verificación combinada
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-combined-${{ needs.precheck.outputs.version }}
+          path: release-assets/
+          retention-days: 14
+
+      - name: Crear GitHub Release público
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.precheck.outputs.version }}"
+          cat > release-notes.md <<NOTES
+          ## Prospect Intelligence ${VERSION} (macOS arm64 y Windows x64)
+
+          - **Distribución limpia:** no incluye bases de datos, contactos ni tokens de APIs. Al abrir la aplicación por primera vez se solicitarán tus propios tokens gratuitos (guardados localmente de forma privada), con enlaces e instrucciones integrados para obtenerlos:
+            - **INEGI DENUE (obligatorio):** \`https://www.inegi.org.mx/servicios/api_denue.html\` (Guía para desarrolladores → correo electrónico).
+            - **INEGI Indicadores (opcional):** \`https://www.inegi.org.mx/servicios/api_indicadores.html\` (o reutiliza tu token DENUE).
+            - **Banxico SIE (opcional, tipo de cambio):** \`https://www.banxico.org.mx/SieAPIRest/service/v1/token\` (captcha → Generar token).
+          - **macOS (Apple Silicon / arm64):**
+            - \`Prospect-Intelligence-${VERSION}-macOS-arm64.zip\`: aplicación \`Prospect Intelligence.app\`. Tiene firma *ad-hoc* (sin notarización Developer ID): al abrir por primera vez usa clic derecho → **Abrir** o **Ajustes del Sistema → Privacidad y seguridad**.
+            - \`prospectos-${VERSION}-macOS-arm64.tar.gz\`: CLI \`prospectos\` con \`LICENSE\` y \`THIRD_PARTY_NOTICES.md\`.
+          - **Windows (x64, experimental sin prueba física en hardware Windows):**
+            - \`Prospect-Intelligence-${VERSION}-Windows-x64.zip\`: \`ProspectIntelligence.exe\` (requiere WebView2 Runtime, incluido en Windows 11 y Windows 10 actualizado; si aparece SmartScreen sin firma Authenticode, elige **Más información → Ejecutar de todas formas**).
+            - \`prospectos-${VERSION}-Windows-x64.zip\`: CLI \`prospectos.exe\` con \`LICENSE\` y \`THIRD_PARTY_NOTICES.md\`.
+          - **Integridad:** \`SHA256SUMS.txt\` incluye las sumas SHA-256 de todos los archivos adjuntos.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" \
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.zip" \
+            "release-assets/prospectos-${VERSION}-macOS-arm64.tar.gz" \
+            "release-assets/Prospect-Intelligence-${VERSION}-Windows-x64.zip" \
+            "release-assets/prospectos-${VERSION}-Windows-x64.zip" \
+            "release-assets/SHA256SUMS.txt" \
+            --verify-tag \
+            --title "Prospect Intelligence v${VERSION}" \
+            --notes-file release-notes.md

@@ -1,4 +1,5 @@
 mod mobile;
+mod settings;
 mod workspace;
 use crate::{
     Layout, Services,
@@ -54,17 +55,31 @@ impl Screen {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq)]
+struct FloatingNotification {
+    id: u64,
+    message: String,
+    is_error: bool,
+}
+
 #[derive(Clone, Copy)]
 struct UiState {
     screen: Signal<Screen>,
+    settings_tab: Signal<usize>,
     query: Signal<Query>,
     selected: Signal<String>,
     revision: Signal<u64>,
     settings: Signal<Settings>,
     job: Signal<Option<JobControl>>,
+    job_minimized: Signal<bool>,
+    dismissed_job_id: Signal<String>,
+    heavy_task: Signal<Option<String>>,
     toast: Signal<String>,
+    notifications: Signal<Vec<FloatingNotification>>,
+    notif_seq: Signal<u64>,
     busy: Signal<bool>,
     pending: Signal<Option<Mutation>>,
+    mobile_layout: bool,
 }
 #[derive(Clone, Copy)]
 enum JobKind {
@@ -78,6 +93,109 @@ enum JobKind {
 }
 fn job_start(kind: JobKind, ui: UiState, db: Db, indicator: String) {
     job_start_scoped(kind, ui, db, indicator, None);
+}
+fn job_start_sync(
+    mut ui: UiState,
+    db: Db,
+    entities_override: Option<Vec<String>>,
+    analyze_all: bool,
+    minimized: bool,
+    custom_label: Option<String>,
+) {
+    if ui
+        .job
+        .peek()
+        .as_ref()
+        .is_some_and(|j| j.snapshot().status == "running")
+    {
+        ui.toast
+            .set("Ya hay una actualización en curso; espera a que termine o cancélala.".into());
+        return;
+    }
+    let mut settings = ui.settings.peek().clone();
+    if let Some(entities) = entities_override {
+        if entities.is_empty() {
+            return;
+        }
+        settings.entities = entities;
+    }
+    let profile = Profile::parse(&settings.profile).unwrap_or_default();
+    let label = custom_label.unwrap_or_else(|| {
+        if analyze_all {
+            "Actualizar todo y recalcular".into()
+        } else {
+            "Actualizar nuevos registros".into()
+        }
+    });
+    let control = JobControl::new(&label);
+    ui.dismissed_job_id.set(String::new());
+    ui.job_minimized.set(minimized);
+    ui.job.set(Some(control.clone()));
+    tokio::spawn(async move {
+        let denue_ok = db
+            .paths
+            .secrets()
+            .map(|s| !s.denue.trim().is_empty())
+            .unwrap_or(false);
+        if denue_ok {
+            let progress = match db.denue_progress(settings.clone(), profile).await {
+                Ok(p) => p,
+                Err(e) => {
+                    control.finish(&Err(e));
+                    let _ = db.log_job(control.snapshot()).await;
+                    return;
+                }
+            };
+            let has_pending = progress.iter().any(|p| p.started && !p.completed);
+            let mut pull_result: prospect_core::Result<usize> = Ok(0);
+            if has_pending {
+                pull_result = prospect_core::updates::pull_batch(
+                    &db,
+                    &settings,
+                    profile,
+                    prospect_core::updates::ImportMode::Resume,
+                    &control,
+                )
+                .await;
+            }
+            if pull_result.is_ok()
+                && !control.token.is_cancelled()
+                && control.snapshot().pages < settings.denue_pages
+            {
+                let refreshed = db.denue_progress(settings.clone(), profile).await;
+                if let Ok(list) = refreshed {
+                    let still_pending = list.iter().any(|p| p.started && !p.completed);
+                    let has_ready = list.iter().any(|p| !p.started);
+                    if !still_pending && has_ready {
+                        pull_result = prospect_core::updates::pull_batch(
+                            &db,
+                            &settings,
+                            profile,
+                            prospect_core::updates::ImportMode::New,
+                            &control,
+                        )
+                        .await;
+                    }
+                }
+            }
+            if let Err(e) = pull_result {
+                let changed = control.snapshot().inserted + control.snapshot().updated;
+                if !control.token.is_cancelled() && changed > 0 {
+                    let _ = db.analyze_pending(settings, control.clone()).await;
+                }
+                control.finish(&Err(e));
+                let _ = db.log_job(control.snapshot()).await;
+                return;
+            }
+        }
+        let analysis = if analyze_all {
+            db.analyze(settings, control.clone()).await
+        } else {
+            db.analyze_pending(settings, control.clone()).await
+        };
+        control.finish(&analysis);
+        let _ = db.log_job(control.snapshot()).await;
+    });
 }
 fn job_start_scoped(kind: JobKind, ui: UiState, db: Db, indicator: String, entity: Option<String>) {
     if ui
@@ -94,7 +212,7 @@ fn job_start_scoped(kind: JobKind, ui: UiState, db: Db, indicator: String, entit
         if !matches!(kind, JobKind::Import | JobKind::Resume) || !settings.entities.contains(entity)
         {
             ui.toast
-                .set("Selecciona primero este estado en Ajustes → Datos".into());
+                .set("Selecciona primero este estado en Ajustes → Base de datos y alcance".into());
             return;
         }
         settings.entities = vec![entity.clone()];
@@ -102,11 +220,11 @@ fn job_start_scoped(kind: JobKind, ui: UiState, db: Db, indicator: String, entit
     let profile = Profile::parse(&settings.profile).unwrap_or_default();
     let paths = db.paths.clone();
     let label = match kind {
-        JobKind::Import => "DENUE · importar nuevos",
-        JobKind::Resume => "DENUE · reanudar",
-        JobKind::Recheck => "DENUE · revisar",
-        JobKind::Analyze => "Analizar",
-        JobKind::Enrich => "Revisar sitios",
+        JobKind::Import => "Actualizar registros",
+        JobKind::Resume => "Completar lote",
+        JobKind::Recheck => "Revisar datos consultados",
+        JobKind::Analyze => "Calcular prioridades",
+        JobKind::Enrich => "Verificar sitios web",
         JobKind::Banxico => "Banxico",
         JobKind::Inegi => "INEGI",
     };
@@ -115,6 +233,8 @@ fn job_start_scoped(kind: JobKind, ui: UiState, db: Db, indicator: String, entit
         .map(|code| format!("{label} · {}", prospect_core::config::entity_name(code)))
         .unwrap_or_else(|| label.to_owned());
     let control = JobControl::new(&label);
+    ui.dismissed_job_id.set(String::new());
+    ui.job_minimized.set(false);
     ui.job.set(Some(control.clone()));
     tokio::spawn(async move {
         let result = match kind {
@@ -129,7 +249,7 @@ fn job_start_scoped(kind: JobKind, ui: UiState, db: Db, indicator: String, entit
                         .await;
                 let changed = control.snapshot().inserted + control.snapshot().updated;
                 if (result.is_ok() || (!control.token.is_cancelled() && changed > 0))
-                    && let Err(e) = db.analyze(settings, control.clone()).await
+                    && let Err(e) = db.analyze_pending(settings, control.clone()).await
                 {
                     control.finish(&Err(e));
                     let _ = db.log_job(control.snapshot()).await;
@@ -176,7 +296,7 @@ fn mutation(
         notes,
     }));
 }
-fn open_link(link: &str) -> std::result::Result<(), String> {
+pub(crate) fn open_link(link: &str) -> std::result::Result<(), String> {
     let u = prospect_core::contacts::normalize_url(link);
     if link.starts_with("mailto:") || link.starts_with("tel:") || u.is_some() {
         #[cfg(not(target_os = "ios"))]
@@ -285,20 +405,270 @@ pub(crate) fn brand_icon_url() -> String {
     result
 }
 
+pub(crate) fn loading_spinner_svg() -> Element {
+    rsx! {
+        svg {
+            class: "loading-spinner",
+            view_box: "0 0 28 28",
+            width: "28",
+            height: "28",
+            fill: "none",
+            "aria-hidden": "true",
+            circle {
+                cx: "14",
+                cy: "14",
+                r: "11",
+                stroke: "currentColor",
+                stroke_opacity: "0.18",
+                stroke_width: "3",
+            }
+            g {
+                path {
+                    d: "M14 3a11 11 0 0 1 11 11",
+                    stroke: "currentColor",
+                    stroke_width: "3",
+                    stroke_linecap: "round",
+                }
+                animateTransform {
+                    attribute_name: "transform",
+                    r#type: "rotate",
+                    "from": "0 14 14",
+                    "to": "360 14 14",
+                    "dur": "0.8s",
+                    repeat_count: "indefinite",
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn job_progress_percent(state: &JobState) -> Option<usize> {
+    if state.total == 0 {
+        return None;
+    }
+    let done = if state.analyzing {
+        state.processed
+    } else {
+        state.pages
+    };
+    Some(
+        done.saturating_mul(100)
+            .checked_div(state.total)
+            .unwrap_or(0)
+            .min(100),
+    )
+}
+
+pub(crate) fn loading_progress_bar(pct: Option<usize>, status: &str) -> Element {
+    let tone = match status {
+        "completed" => "progress-fill complete",
+        "failed" | "cancelled" => "progress-fill error",
+        _ => "progress-fill",
+    };
+    match pct {
+        Some(value) => rsx! {
+            div { class: "progress-track",
+                div { class: "{tone}", style: "width: {value}%" }
+            }
+        },
+        None => rsx! {
+            div { class: "progress-track",
+                div { class: "progress-indeterminate" }
+            }
+        },
+    }
+}
+
+pub(crate) fn loading_screen_card(label: &'static str) -> Element {
+    rsx! {
+        section {
+            class: "panel load-status loading-screen-card",
+            role: "status",
+            aria_busy: "true",
+            {loading_spinner_svg()}
+            div { class: "loading-screen-copy",
+                h2 { "Cargando {label}…" }
+                p { class: "muted", "Consultando la base local. Espera un momento." }
+                {loading_progress_bar(None, "running")}
+            }
+        }
+    }
+}
+
+#[component]
+fn JobLoadingOverlay(state: JobState, running: bool) -> Element {
+    let mut ui = use_context::<UiState>();
+    let heavy_label = ui.heavy_task.read().clone();
+    let show_job = running && !*ui.job_minimized.read();
+    if !show_job && heavy_label.is_none() {
+        return rsx! {};
+    }
+    let title = if show_job {
+        state.kind.clone()
+    } else {
+        heavy_label.clone().unwrap_or_else(|| "Procesando…".into())
+    };
+    let detail = if show_job {
+        if state.message.is_empty() {
+            "Conectando y procesando registros…".to_owned()
+        } else {
+            state.message.clone()
+        }
+    } else {
+        "Operación pesada en curso. No cierres la aplicación.".to_owned()
+    };
+    let pct = if show_job {
+        job_progress_percent(&state)
+    } else {
+        None
+    };
+    rsx! {
+        div { class: "loading-backdrop", role: "status", aria_live: "polite", aria_busy: "true",
+            div { class: "loading-card",
+                div { class: "loading-card-head",
+                    {loading_spinner_svg()}
+                    div {
+                        p { class: "eyebrow", "OPERACIÓN EN CURSO" }
+                        h2 { "{title}" }
+                    }
+                    if let Some(p) = pct {
+                        span { class: "badge loading-pct-badge", "{p}%" }
+                    }
+                }
+                p { class: "loading-card-copy", "{detail}" }
+                {loading_progress_bar(pct, &state.status)}
+                if show_job && state.requests > 0 {
+                    p { class: "muted small", "Consultas enviadas: {state.requests}" }
+                }
+                if show_job {
+                    div { class: "loading-card-actions",
+                        button {
+                            class: "button secondary compact",
+                            onclick: move |_| ui.job_minimized.set(true),
+                            "Seguir en segundo plano"
+                        }
+                        button {
+                            class: "button secondary compact",
+                            onclick: move |_| {
+                                if let Some(j) = ui.job.peek().as_ref() {
+                                    j.token.cancel();
+                                }
+                            },
+                            "Cancelar"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn NotificationCenter(state: JobState, running: bool, mut job_state: Signal<JobState>) -> Element {
+    let mut ui = use_context::<UiState>();
+    let notifications = ui.notifications.read().clone();
+    let show_job = !state.id.is_empty()
+        && *ui.dismissed_job_id.read() != state.id
+        && (!running || *ui.job_minimized.read());
+    if !show_job && notifications.is_empty() {
+        return rsx! {};
+    }
+    let pct = if running {
+        job_progress_percent(&state)
+    } else if state.status == "completed" {
+        Some(100)
+    } else {
+        None
+    };
+    let is_failed = matches!(state.status.as_str(), "failed" | "cancelled");
+    rsx! {
+        aside { class: "toast-stack", aria_label: "Notificaciones",
+            if show_job {
+                section {
+                    class: if is_failed { "toast-card toast-job toast-error" } else { "toast-card toast-job" },
+                    role: "status",
+                    div { class: "toast-card-head",
+                        if running {
+                            {loading_spinner_svg()}
+                        } else {
+                            span { class: if is_failed { "toast-dot error" } else { "toast-dot ok" } }
+                        }
+                        div { class: "toast-card-title",
+                            strong { "{state.kind}" }
+                            if let Some(p) = pct {
+                                span { class: "muted small", "{p}%" }
+                            }
+                        }
+                        if !running {
+                            button {
+                                class: "toast-close",
+                                aria_label: "Cerrar progreso",
+                                onclick: move |_| {
+                                    let id = state.id.clone();
+                                    ui.dismissed_job_id.set(id);
+                                    ui.job.set(None);
+                                    job_state.set(JobState::default());
+                                },
+                                "×"
+                            }
+                        }
+                    }
+                    p { class: "toast-card-msg", "{state.message}" }
+                    {loading_progress_bar(pct, &state.status)}
+                    if running {
+                        div { class: "toast-card-actions",
+                            if state.requests > 0 {
+                                span { class: "muted small", "Consultas: {state.requests}" }
+                            }
+                            button {
+                                class: "link-button small",
+                                onclick: move |_| ui.job_minimized.set(false),
+                                "Ampliar"
+                            }
+                            button {
+                                class: "button secondary compact",
+                                onclick: move |_| {
+                                    if let Some(j) = ui.job.peek().as_ref() {
+                                        j.token.cancel();
+                                    }
+                                },
+                                "Cancelar"
+                            }
+                        }
+                    }
+                }
+            }
+            for item in notifications {
+                div {
+                    key: "toast-{item.id}",
+                    class: if item.is_error { "toast-card toast-error" } else { "toast-card" },
+                    role: "status",
+                    span { class: if item.is_error { "toast-dot error" } else { "toast-dot ok" } }
+                    p { class: "toast-card-msg", "{item.message}" }
+                    button {
+                        class: "toast-close",
+                        aria_label: "Cerrar aviso",
+                        onclick: move |_| {
+                            ui.notifications.write().retain(|n| n.id != item.id);
+                        },
+                        "×"
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn resource_status<T: 'static>(
     mut resource: Resource<Result<T, String>>,
     label: &'static str,
 ) -> Option<Element> {
     if *resource.state().read() == UseResourceState::Pending {
-        return Some(
-            rsx! {section{class:"panel load-status",role:"status",aria_busy:"true",h2{"Cargando {label}…"}p{class:"muted","Espera un momento."}}},
-        );
+        return Some(loading_screen_card(label));
     }
     let value = resource.read();
     match value.as_ref() {
-        None => Some(
-            rsx! {section{class:"panel load-status",role:"status",aria_busy:"true",h2{"Cargando {label}…"}p{class:"muted","Espera un momento."}}},
-        ),
+        None => Some(loading_screen_card(label)),
         Some(Err(error)) => {
             let error = error.clone();
             Some(
@@ -376,6 +746,13 @@ pub fn App() -> Element {
     let mobile_layout = service.layout == Layout::Ios;
     let brand_icon = use_hook(brand_icon_url);
     let db = service.db.clone();
+    let onboarding = try_use_context::<crate::onboarding::OnboardingControl>();
+    let configured_denue_missing = service
+        .db
+        .paths
+        .secrets()
+        .map(|s| s.denue.trim().is_empty())
+        .unwrap_or(true);
     let mut screen = use_signal(Screen::default);
     let mut query = use_signal(|| Query {
         contactable: true,
@@ -391,16 +768,155 @@ pub fn App() -> Element {
     let table_layout = use_signal(prospect_core::workspace::TableLayout::default);
     let ui = UiState {
         screen,
+        settings_tab: use_signal(move || if configured_denue_missing { 2 } else { 0 }),
         query,
         selected,
         revision: use_signal(|| 0u64),
         settings: use_signal(|| service.settings.clone()),
         job: use_signal(|| None),
+        job_minimized: use_signal(|| false),
+        dismissed_job_id: use_signal(String::new),
+        heavy_task: use_signal(|| None),
         toast: use_signal(String::new),
+        notifications: use_signal(Vec::new),
+        notif_seq: use_signal(|| 0u64),
         busy: use_signal(|| false),
         pending: use_signal(|| None),
+        mobile_layout,
     };
     use_context_provider(|| ui);
+    let mut toast_ui = ui;
+    use_effect(move || {
+        let message = toast_ui.toast.read().clone();
+        if message.trim().is_empty() {
+            return;
+        }
+        toast_ui.toast.set(String::new());
+        let next_id = *toast_ui.notif_seq.peek() + 1;
+        toast_ui.notif_seq.set(next_id);
+        let lower = message.to_lowercase();
+        let is_error = lower.starts_with("error")
+            || lower.contains("no se ")
+            || lower.contains("cancelado")
+            || lower.contains("falta")
+            || lower.contains("inválid");
+        toast_ui.notifications.with_mut(|list| {
+            list.insert(
+                0,
+                FloatingNotification {
+                    id: next_id,
+                    message,
+                    is_error,
+                },
+            );
+            if list.len() > 4 {
+                list.truncate(4);
+            }
+        });
+        let mut auto_clear_ui = toast_ui;
+        spawn(async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            auto_clear_ui
+                .notifications
+                .write()
+                .retain(|n| n.id != next_id);
+        });
+    });
+    let first_run_db = db.clone();
+    let mut restored_ui = ui;
+    use_effect(move || {
+        let Some(mut ctrl) = onboarding else {
+            return;
+        };
+        let Some(restored) = ctrl.restored.read().clone() else {
+            return;
+        };
+        ctrl.restored.set(None);
+        restored_ui.settings.set(restored.settings);
+        restored_ui.revision += 1;
+        restored_ui.toast.set(format!(
+            "Respaldo cargado: {} empresas{}.",
+            number(restored.records),
+            if restored.tokens { " y tus tokens" } else { "" }
+        ));
+    });
+    let mut first_run_ui = ui;
+    use_effect(move || {
+        if mobile_layout {
+            return;
+        }
+        let Some(mut ctrl) = onboarding else {
+            return;
+        };
+        if !*ctrl.first_run_pending_sync.read() {
+            return;
+        }
+        ctrl.first_run_pending_sync.set(false);
+        let mut updated = first_run_ui.settings.peek().clone();
+        if !updated.entities.iter().any(|e| e == "09") {
+            updated.entities.push("09".into());
+            updated.entities.sort();
+            updated.entities.dedup();
+            if let Err(e) = updated.save(&first_run_db.paths) {
+                first_run_ui
+                    .toast
+                    .set(format!("No se guardó CDMX por defecto: {e}"));
+            } else {
+                first_run_ui.settings.set(updated);
+            }
+        }
+        first_run_ui.settings_tab.set(1);
+        first_run_ui.screen.set(Screen::Settings);
+        job_start_sync(
+            first_run_ui,
+            first_run_db.clone(),
+            Some(vec!["09".into()]),
+            false,
+            false,
+            Some("Descarga inicial · Ciudad de México".into()),
+        );
+    });
+    let auto_db = db.clone();
+    let mut auto_ui = ui;
+    let mut auto_checked = use_signal(|| false);
+    use_effect(move || {
+        if mobile_layout || *auto_checked.peek() {
+            return;
+        }
+        auto_checked.set(true);
+        if onboarding.is_some_and(|o| *o.first_run_pending_sync.peek()) {
+            return;
+        }
+        let running_now = auto_ui
+            .job
+            .peek()
+            .as_ref()
+            .is_some_and(|j| j.snapshot().status == "running");
+        if running_now {
+            return;
+        }
+        let denue_ok = auto_db
+            .paths
+            .secrets()
+            .map(|s| !s.denue.trim().is_empty())
+            .unwrap_or(false);
+        let today = prospect_core::config::today();
+        let mut s = auto_ui.settings.peek().clone();
+        if denue_ok && s.auto_update_due(today) {
+            s.last_auto_update_date = today.to_string();
+            if s.save(&auto_db.paths).is_ok() {
+                auto_ui.settings.set(s);
+                job_start_sync(
+                    auto_ui,
+                    auto_db.clone(),
+                    None,
+                    false,
+                    true,
+                    Some("Actualización automática".into()),
+                );
+            }
+        }
+    });
     let mobile_navigation = use_context_provider(mobile::Navigation::new);
     let navigation_identity = use_memo(move || {
         (
@@ -445,7 +961,6 @@ pub fn App() -> Element {
                 if state.id != last_id || state.status != last_status {
                     if state.status != "running" {
                         job_ui.revision += 1;
-                        job_ui.toast.set(state.message.clone());
                     }
                     last_id = state.id.clone();
                     last_status = state.status.clone();
@@ -525,11 +1040,18 @@ pub fn App() -> Element {
     );
     let summary_db = db.clone();
     let summary = use_cached_read(
-        move || format!("{}|summary", ui.revision.read()),
+        move || {
+            format!(
+                "{}|summary:{}",
+                ui.revision.read(),
+                query.read().profile.id()
+            )
+        },
         move || {
             let _ = *ui.revision.read();
+            let profile = query.read().profile;
             let db = summary_db.clone();
-            async move { db.summary().await.map_err(|e| e.to_string()) }
+            async move { db.summary(profile).await.map_err(|e| e.to_string()) }
         },
     );
     let dim_db = db.clone();
@@ -580,6 +1102,8 @@ pub fn App() -> Element {
         (Screen::Opportunities, 0),
         (Screen::Indicators, 0),
     ];
+    let paths_settings_btn = db.paths.clone();
+    let paths_profile = db.paths.clone();
     rsx! {
         style { {include_str!("style.css")} }
         div { class:"app", "data-theme":settings.theme,
@@ -587,19 +1111,19 @@ pub fn App() -> Element {
                 div {class:"brand",img{class:"brand-icon",src:brand_icon.clone(),alt:"",aria_hidden:"true"}div{strong{"Prospect"}span{"Intelligence"}}}
                 p {class:"eyebrow", "TU MESA DE TRABAJO"}
                 nav {for (target,count)in menu{button{class:if current==target{"nav active"}else{"nav"},aria_current:if current==target{"page"}else{"false"},onclick:move |_|{screen.set(target);query.write().view=target.view();query.write().page=0;query.write().contactable=target==Screen::Today;selected.set(String::new());},span{"{target.label()}"}if count>0{span{class:"nav-count","{number(count)}"}}}}}
-                div {class:"sidebar-bottom",div{class:"local-badge",span{class:"dot"} "Personal · datos locales"}button{class:if current==Screen::Settings{"nav active"}else{"nav"},onclick:move |_|screen.set(Screen::Settings),"Ajustes"}p{class:"muted small","Fuente principal: INEGI / DENUE"}}
+                div {class:"sidebar-bottom",div{class:"local-badge",span{class:"dot"} "Personal · datos locales"}button{class:if current==Screen::Settings && *ui.settings_tab.read()==1{"nav active"}else{"nav"},onclick:move |_|navigate(Screen::Updates,ui),"Actualizaciones"}button{class:if current==Screen::Settings && *ui.settings_tab.read()!=1{"nav active"}else{"nav"},onclick:move |_|{let mut u=ui;let missing=paths_settings_btn.secrets().map(|s|s.denue.trim().is_empty()).unwrap_or(true);u.settings_tab.set(if missing{2}else{0});u.screen.set(Screen::Settings);},"Ajustes"}p{class:"muted small","Fuente principal: INEGI / DENUE"}}
             }
             main {class:"main",
                 header {class:"topbar",div{p{class:"eyebrow","PROSPECCIÓN Y NEGOCIO"}h1{"{current.label()}"}p{class:"muted small","{prospect_core::config::today()} · Una próxima acción clara."}}
-                    div{class:"header-controls",label{class:"sr-only",r#for:"offer-profile","Perfil comercial"}select{id:"offer-profile",value:profile.id(),onchange:move|e|{if let Ok(p)=Profile::parse(&e.value()){query.write().profile=p;query.write().page=0;let mut u=ui;u.settings.write().profile=p.id().into();if let Err(e)=u.settings.peek().save(&db.paths){u.toast.set(format!("No se guardaron las preferencias: {e}"));}}},option{value:"automatizacion","Automatización y sistemas"}option{value:"web_marketing","Web y marketing"}}
+                    div{class:"header-controls",label{class:"sr-only",r#for:"offer-profile","Perfil comercial"}select{id:"offer-profile",value:profile.id(),onchange:move|e|{if let Ok(p)=Profile::parse(&e.value()){query.write().profile=p;query.write().page=0;let mut u=ui;u.settings.write().profile=p.id().into();if let Err(e)=u.settings.peek().save(&paths_profile){u.toast.set(format!("No se guardaron las preferencias: {e}"));}}},option{value:"automatizacion","Automatización y sistemas"}option{value:"web_marketing","Web y marketing"}}
 
                     }
                 }
                 if summary.value().is_some_and(|s|s.total==0) && current!=Screen::Settings && current!=Screen::Updates {
-                    div{class:"first-run notice",strong{"Empieza con tu propia base"}p{class:"small","En Ajustes → Fuentes, añade tu token DENUE. Elige estados en Datos y ejecuta un primer lote. No se descargará nada automáticamente."}button{class:"button secondary compact",onclick:move |_|navigate(Screen::Settings,ui),"Abrir Ajustes"}button{class:"button secondary compact",onclick:move |_|navigate(Screen::Updates,ui),"Gestionar datos"}}
+                    div{class:"first-run notice",strong{"Empieza con tu propia base"}p{class:"small","En Ajustes → Tokens y fuentes, añade tu token DENUE. Elige estados y ejecuta lotes en Base de datos y alcance."}if let Some(mut o) = onboarding { { let _ = *o.revision.read(); let missing = db.paths.secrets().map(|s|s.denue.trim().is_empty()).unwrap_or(true); rsx! { if missing { button{class:"button primary compact",onclick:move |_|o.open.set(true),"Configurar tokens"} } } } }button{class:"button secondary compact",onclick:move |_|{let mut u=ui;u.settings_tab.set(0);u.screen.set(Screen::Settings);},"Abrir Ajustes"}button{class:"button secondary compact",onclick:move |_|navigate(Screen::Updates,ui),"Gestionar datos"}}
                 }
-                if !ui.toast.read().is_empty(){div{class:"toast",role:"status",span{"{ui.toast}"}button{aria_label:"Cerrar aviso",onclick:move |_|{let mut u=ui;u.toast.set(String::new());},"×"}}}
-                if !state.id.is_empty(){div{class:"job-strip",role:"status",span{class:"dot"}strong{"{state.kind}"}span{"{state.message}"}if state.requests>0{span{class:"muted small","Intentos de consulta: {state.requests}"}}if running{button{class:"button secondary compact",onclick:move |_|{if let Some(j)=ui.job.peek().as_ref(){j.token.cancel();}},"Cancelar"}}else{button{class:"link-button",onclick:move |_|{let mut u=ui;u.job.set(None);job_state.set(JobState::default());},"Cerrar"}}}}
+                NotificationCenter{state:state.clone(),running,job_state}
+                JobLoadingOverlay{state:state.clone(),running}
                 match current {
                     Screen::Today|Screen::Followups|Screen::Conversations|Screen::Base=>rsx!{
                         div{class:"daily-strip",DailyGoal{label:"Revisados",done:totals.researched_today,goal:settings.daily_research}DailyGoal{label:"Contactos",done:totals.contacted_today,goal:settings.daily_contacts}DailyGoal{label:"Seguimientos",done:totals.followed_today,goal:settings.daily_followups}button{class:"link-button",disabled:*ui.busy.read(),onclick:move |_|{let s=consume_context::<Services>();mutation(Command::Publication{},String::new(),None,profile,ui,s.db);},"Registrar publicación · {totals.publications_today}"}}
@@ -617,14 +1141,13 @@ pub fn App() -> Element {
                         }if !selected.read().is_empty(){ProspectDetail{key:"{selected}:{profile.id()}",id:selected.read().clone(),profile}}else{section{class:"panel detail-empty",h2{"Elige un establecimiento"}p{class:"muted","Verás contexto, evidencia y la siguiente acción."}}}}}
                     },
                     Screen::Dashboard=>rsx!{DashboardPanel{key:"{profile.id()}",profile}},
-                    Screen::Updates=>rsx!{UpdatesPanel{key:"{profile.id()}",profile}},
+                    Screen::Updates|Screen::Settings=>rsx!{settings::SettingsPanel{}},
                     Screen::Metrics=>rsx!{MetricsPanel{key:"{profile.id()}",profile}},
                     Screen::Territories=>rsx!{TerritoriesPanel{key:"{profile.id()}",profile,screen,query,selected}},
                     Screen::Opportunities=>rsx!{OpportunitiesPanel{key:"{profile.id()}",profile}},
                     Screen::Indicators=>rsx!{IndicatorsPanel{}},
-                    Screen::Settings=>rsx!{SettingsPanel{}},
                 }
-                if current==Screen::Base{div{class:"base-actions",button{class:"button primary",onclick:move |_|navigate(Screen::Updates,ui),"Gestionar datos"}button{class:"button secondary",disabled:running,onclick:move |_|{let s=consume_context::<Services>();job_start(JobKind::Analyze,ui,s.db,String::new());},"Recalcular prioridades"}button{class:"button secondary",disabled:running,onclick:move |_|{let s=consume_context::<Services>();job_start(JobKind::Enrich,ui,s.db,String::new());},"Revisar sitios · hasta 100"}span{class:"muted small","Los datos públicos se actualizan sin borrar tu seguimiento."}}}
+                if current==Screen::Base{div{class:"base-actions",button{class:"button primary",onclick:move |_|navigate(Screen::Updates,ui),"Actualizar datos y prioridades"}span{class:"muted small","Los datos públicos se actualizan sin borrar tu seguimiento."}}}
             }
         }
     }
@@ -737,13 +1260,43 @@ fn Pagination(data: Page, mut query: Signal<Query>) -> Element {
 #[component]
 fn ExportButtons(query: Query) -> Element {
     let ui = use_context::<UiState>();
-    rsx! {for format in ["csv","xlsx"]{{let q=query.clone();rsx!{button{class:"button secondary compact",onclick:move |_|{let db=consume_context::<Services>().db;let q=q.clone();let mut u=ui;spawn(async move{match db.export(q,format).await{Ok(p)=>u.toast.set(available_file(p).unwrap_or_else(|e|e)),Err(e)=>u.toast.set(e.to_string())}});},"{format.to_uppercase()}"}}}}}
+    rsx! {for format in ["csv","xlsx"]{{let q=query.clone();rsx!{button{class:"button secondary compact",disabled:ui.heavy_task.read().is_some(),onclick:move |_|{let db=consume_context::<Services>().db;let q=q.clone();let mut u=ui;u.heavy_task.set(Some(format!("Exportando registros ({})…",format.to_uppercase())));spawn(async move{let res=db.export(q,format).await;u.heavy_task.set(None);match res{Ok(p)=>u.toast.set(available_file(p).unwrap_or_else(|e|e)),Err(e)=>u.toast.set(e.to_string())}});},"{format.to_uppercase()}"}}}}}
+}
+/// Opens a saved search on the screen that shows its view and keeps the chosen offer.
+fn open_saved_filter(
+    q: Query,
+    mut query: Signal<Query>,
+    mut ui: UiState,
+    paths: &prospect_core::AppPaths,
+) {
+    let screen = match q.view {
+        View::Today => Screen::Today,
+        View::Due => Screen::Followups,
+        View::Conversations => Screen::Conversations,
+        View::Clients | View::All => Screen::Base,
+    };
+    if ui.settings.peek().profile != q.profile.id() {
+        let mut settings = ui.settings.peek().clone();
+        settings.profile = q.profile.id().into();
+        if let Err(e) = settings.save(paths) {
+            ui.toast
+                .set(format!("No se guardaron las preferencias: {e}"));
+        }
+        ui.settings.set(settings);
+    }
+    if *ui.screen.peek() != screen {
+        ui.selected.set(String::new());
+        ui.screen.set(screen);
+    }
+    query.set(q);
 }
 #[component]
 fn SavedFilters(mut query: Signal<Query>) -> Element {
     let ui = use_context::<UiState>();
     let db = consume_context::<Services>().db;
     let mut name = use_signal(String::new);
+    let mut name_epoch = use_signal(|| 0u64);
+    let paths = db.paths.clone();
     let list_db = db.clone();
     let filters = use_resource(move || {
         let _ = *ui.revision.read();
@@ -751,7 +1304,7 @@ fn SavedFilters(mut query: Signal<Query>) -> Element {
         async move { db.saved_filters().await.unwrap_or_default() }
     });
     let items = filters.read().as_ref().cloned().unwrap_or_default();
-    rsx! {details{class:"saved-filters",summary{"Búsquedas guardadas"}div{class:"saved-inner",TextEntry{label:"Nombre de la búsqueda",initial:String::new(),placeholder:"Ej. Industria Puebla",oninput:move|e:FormEvent|name.set(e.value())}button{class:"button secondary compact",onclick:move |_|{let db=db.clone();let n=name.read().clone();let q=query.read().clone();let mut ui=ui;spawn(async move{match db.save_filter(n,q).await{Ok(())=>{ui.revision+=1;ui.toast.set("Búsqueda guardada".into());},Err(e)=>ui.toast.set(e.to_string())}});},"Guardar"}for (label,q)in items{button{class:"pill-button",onclick:move |_|{let mut u=ui;u.settings.write().profile=q.profile.id().into();query.set(q.clone());},"{label}"}}}}}
+    rsx! {details{class:"saved-filters",summary{"Búsquedas guardadas"}div{class:"saved-inner",TextEntry{key:"saved-name:{name_epoch}",label:"Nombre de la búsqueda",initial:String::new(),placeholder:"Ej. Industria Puebla",oninput:move|e:FormEvent|name.set(e.value())}button{class:"button secondary compact",onclick:move |_|{let db=db.clone();let n=name.read().clone();let q=query.read().clone();let mut ui=ui;spawn(async move{match db.save_filter(n,q).await{Ok(())=>{name.set(String::new());name_epoch+=1;ui.revision+=1;ui.toast.set("Búsqueda guardada".into());},Err(e)=>ui.toast.set(e.to_string())}});},"Guardar"}for (label,q)in items{{let paths=paths.clone();rsx!{button{class:"pill-button",onclick:move |_|open_saved_filter(q.clone(),query,ui,&paths),"{label}"}}}}}}}
 }
 #[component]
 fn PanelTabs(labels: Vec<&'static str>, mut active: Signal<usize>, name: &'static str) -> Element {
@@ -817,11 +1370,30 @@ struct DetailData {
     history: Vec<Interaction>,
     message: Message,
 }
+fn channel_available(p: &Prospect, channel: &str) -> bool {
+    if channel == "email" {
+        !p.email().is_empty()
+    } else {
+        !p.phone().is_empty()
+    }
+}
+/// The recommended channel when the establishment has it; otherwise whichever it has.
+fn start_channel(p: &Prospect) -> &'static str {
+    let recommended = ["email", "telefono", "whatsapp"]
+        .into_iter()
+        .find(|channel| p.canal == *channel);
+    match recommended {
+        Some(channel) if channel_available(p, channel) => channel,
+        _ if !p.email().is_empty() || p.phone().is_empty() => "email",
+        _ => "telefono",
+    }
+}
 #[component]
 fn ProspectDetail(id: String, profile: Profile) -> Element {
     let service = consume_context::<Services>();
     let ui = use_context::<UiState>();
     let mut channel = use_signal(|| "email".to_owned());
+    let mut channel_for = use_signal(String::new);
     let mut body = use_signal(String::new);
     let mut subject = use_signal(String::new);
     let mut notes = use_signal(String::new);
@@ -876,6 +1448,18 @@ fn ProspectDetail(id: String, profile: Profile) -> Element {
             })
         }
     });
+    // Start each establishment on a channel it actually has.
+    use_effect(move || {
+        if let Some(Ok(d)) = detail.read().as_ref()
+            && *channel_for.peek() != d.prospect.id
+        {
+            channel_for.set(d.prospect.id.clone());
+            let start = start_channel(&d.prospect);
+            if *channel.peek() != start {
+                channel.set(start.to_owned());
+            }
+        }
+    });
     use_effect(move || {
         if let Some(Ok(d)) = detail.read().as_ref() {
             let key = format!(
@@ -923,6 +1507,7 @@ fn ProspectDetail(id: String, profile: Profile) -> Element {
         &settings,
     );
     let valid = problems.iter().all(|e| e.starts_with("Aviso:"));
+    let channel_ok = channel_available(&p, &actual_channel);
     let active = !*ui.busy.read();
     let fresh = ["nuevo", "revisado"].contains(&p.estado.as_str());
     let due = p.estado == "contactado"
@@ -978,8 +1563,9 @@ fn ProspectDetail(id: String, profile: Profile) -> Element {
                 for problem in &problems{p{class:if problem.starts_with("Aviso:"){"muted small"}else{"error small"},"{problem}"}}
                 div{class:"action-row",button{class:"button secondary",onclick:move |_|copied(&body.read(),ui),"Copiar mensaje"}if actual_channel=="email"&&!email_link.is_empty(){{let link=email_link.clone();rsx!{button{class:"button secondary",disabled:!valid,onclick:move |_|{let mut u=ui;if let Err(e)=open_link(&link){u.toast.set(e);}},if mobile_layout{"Preparar correo"}else{"Abrir correo ↗"}}}}}if actual_channel=="whatsapp"&&!wa_link.is_empty(){{let link=wa_link.clone();rsx!{button{class:"button secondary",disabled:!valid,onclick:move |_|{let mut u=ui;if let Err(e)=open_link(&link){u.toast.set(e);}},"Abrir WhatsApp ↗"}}}}if actual_channel=="telefono"&&!phone_link.is_empty(){{let link=phone_link.clone();rsx!{button{class:"button secondary",onclick:move |_|{let mut u=ui;if let Err(e)=open_link(&link){u.toast.set(e);}},"Abrir llamada ↗"}}}}}
                 p{class:"muted small",if mobile_layout&&actual_channel=="email"{"Revisa y envía en tu app de correo; después registra el contacto aquí."}else{"Revisa y envía tú. Abrir o copiar no registra el envío."}}
-                if fresh{{let pid=p.id.clone();let variant=data.message.variante.clone();rsx!{button{class:"button primary full",disabled:!active||!valid||!p.contactable(),onclick:move |_|{let s=consume_context::<Services>();mutation(Command::Contact{channel:channel.read().clone(),variant:variant.clone(),message:body.read().clone(),subject:subject.read().clone()},pid.clone(),Some(notes.read().clone()),profile,ui,s.db);},"{primary_text}"}}}}
-                if due{{let pid=p.id.clone();let variant=data.message.variante.clone();rsx!{button{class:"button primary full",disabled:!active||!valid,onclick:move |_|{let s=consume_context::<Services>();mutation(Command::Followup{channel:channel.read().clone(),variant:variant.clone(),message:body.read().clone()},pid.clone(),Some(notes.read().clone()),profile,ui,s.db);},"Registrar seguimiento enviado"}}}}
+                if allow_template && !channel_ok {p{class:"error small",role:"status",if actual_channel=="email"{"Este negocio no tiene correo válido. Elige Llamada o WhatsApp para registrar el contacto."}else{"Este negocio no tiene teléfono válido. Elige Correo para registrar el contacto."}}}
+                if fresh{{let pid=p.id.clone();let variant=data.message.variante.clone();rsx!{button{class:"button primary full",disabled:!active||!valid||!channel_ok,onclick:move |_|{let s=consume_context::<Services>();mutation(Command::Contact{channel:channel.read().clone(),variant:variant.clone(),message:body.read().clone(),subject:subject.read().clone()},pid.clone(),Some(notes.read().clone()),profile,ui,s.db);},"{primary_text}"}}}}
+                if due{{let pid=p.id.clone();let variant=data.message.variante.clone();rsx!{button{class:"button primary full",disabled:!active||!valid||!channel_ok,onclick:move |_|{let s=consume_context::<Services>();mutation(Command::Followup{channel:channel.read().clone(),variant:variant.clone(),message:body.read().clone()},pid.clone(),Some(notes.read().clone()),profile,ui,s.db);},"Registrar seguimiento enviado"}}}}
                 }
                 if !allow_template{p{class:"muted small","Esta conversación ya está abierta. Registra el resultado en Avance o añade tus notas."}}
                 }div{hidden:if mobile_layout {page!=Destination::Progress}else{*action_pane.read()!=1},details{open:true,summary{"Registrar respuesta"}label{"Resultado" select{value:"{response}",onchange:move|e|response.set(e.value()),for (value,label)in [("interesado","Interesado"),("pregunta","Hizo una pregunta"),("redirigido","Me redirigió"),("no_interesado","No interesado"),("ya_tienen_solucion","Ya tienen solución"),("no_es_prioridad","No es prioridad"),("numero_incorrecto","Número incorrecto"),("correo_rebotado","Correo rebotado"),("otro","Otra respuesta")]{option{value,"{label}"}}}}{let pid=p.id.clone();rsx!{button{class:"button secondary full",disabled:!active,onclick:move |_|{let s=consume_context::<Services>();mutation(Command::Response{response:response.read().clone()},pid.clone(),Some(notes.read().clone()),profile,ui,s.db);},"Guardar respuesta"}}}}
@@ -1321,10 +1907,16 @@ fn IndicatorsPanel() -> Element {
 }
 fn navigate(target: Screen, mut ui: UiState) {
     mobile::reset();
-    ui.screen.set(target);
-    ui.query.write().view = target.view();
+    let effective = if !ui.mobile_layout && target == Screen::Updates {
+        ui.settings_tab.set(1);
+        Screen::Settings
+    } else {
+        target
+    };
+    ui.screen.set(effective);
+    ui.query.write().view = effective.view();
     ui.query.write().page = 0;
-    ui.query.write().contactable = target == Screen::Today;
+    ui.query.write().contactable = effective == Screen::Today;
     ui.selected.set(String::new());
 }
 #[derive(Clone, PartialEq)]
@@ -1352,7 +1944,7 @@ fn DashboardPanel(profile: Profile) -> Element {
             let settings = ui.settings.read().clone();
             let db = db.clone();
             async move {
-                let summary = db.summary().await.map_err(|e| e.to_string())?;
+                let summary = db.summary(profile).await.map_err(|e| e.to_string())?;
                 let metrics = db
                     .metrics(profile, "giro".into())
                     .await
@@ -1421,11 +2013,15 @@ struct UpdateData {
 #[component]
 fn UpdatesPanel(profile: Profile) -> Element {
     let ui = use_context::<UiState>();
+    let onboarding = try_use_context::<crate::onboarding::OnboardingControl>();
     let mobile = mobile::navigation().is_some();
     let page = mobile::destination();
     let db = consume_context::<Services>().db;
     let data = use_resource(move || {
         let _ = *ui.revision.read();
+        if let Some(o) = onboarding {
+            let _ = *o.revision.read();
+        }
         let settings = ui.settings.read().clone();
         let db = db.clone();
         async move {
@@ -1489,7 +2085,7 @@ fn UpdatesPanel(profile: Profile) -> Element {
         if mobile && page==Destination::Root {mobile::PageMenu{pages:vec![Destination::Denue,Destination::Coverage,Destination::OtherSources]}}
         div{class:"stats-grid",hidden:mobile && page!=Destination::Root,StatCard{label:"Sin consultar",value:number(ready),note:"Segmentos de tu selección"}StatCard{label:"Por reanudar",value:number(pending),note:"Lotes incompletos"}StatCard{label:"Completos",value:number(complete),note:"Consultas registradas"}StatCard{label:"Límite por clic",value:format!("{} {}",settings.denue_pages,if settings.denue_pages==1{"página"}else{"páginas"}),note:"Hasta 200 registros por página"}}
         section{class:"panel",hidden:mobile && page!=Destination::Denue,div{class:"panel-heading",h2{if profile==Profile::Automatizacion{"DENUE · Automatización y sistemas"}else{"DENUE · Web y marketing"}}button{class:"link-button small",onclick:move |_|navigate(Screen::Settings,ui),"Cambiar estados y límites →"}}div{class:"form-body updates-controls",p{class:"muted small","Cada botón ejecuta un lote y se detiene. Sin programación automática; hasta tres intentos por página si falla la conexión. Los segmentos completos se omiten al importar nuevos."}
-            if !d.denue_configured{div{class:"notice",strong{"Configura tu token DENUE"}p{"Ajustes → Fuentes. Usa tus propias credenciales; no se incluyen en la aplicación."}button{class:"link-button",onclick:move |_|{let mut ui=ui;if let Err(e)=open_link("https://www.inegi.org.mx/servicios/api_denue.html"){ui.toast.set(e);}},"Cómo obtener tu token INEGI ↗"}button{class:"link-button",onclick:move |_|navigate(Screen::Settings,ui),"Abrir Ajustes"}}}
+            if !d.denue_configured{div{class:"notice",strong{"Configura tu token DENUE"}p{"Ajustes → Fuentes. Usa tus propias credenciales; no se incluyen en la aplicación."}button{class:"link-button",onclick:move |_|{let mut ui=ui;if let Err(e)=open_link(crate::onboarding::DENUE_GUIDE.url){ui.toast.set(e);}},"Cómo obtener tu token DENUE en INEGI ↗"}button{class:"link-button",onclick:move |_|navigate(Screen::Settings,ui),"Abrir Ajustes"}}}
             div{class:"action-row",button{class:"button primary",disabled:running||!d.denue_configured||ready==0||pending>0,onclick:move |_|{let s=consume_context::<Services>();job_start(JobKind::Import,ui,s.db,String::new());},"Importar nuevos"}button{class:"button secondary",disabled:running||!d.denue_configured||pending==0,onclick:move |_|{let s=consume_context::<Services>();job_start(JobKind::Resume,ui,s.db,String::new());},"Reanudar pendientes"}button{class:"button secondary",disabled:running,onclick:move |_|{let s=consume_context::<Services>();job_start(JobKind::Analyze,ui,s.db,String::new());},"Recalcular reglas · local"}}
             details{summary{"Revisar datos ya consultados"}p{class:"muted small","Inicia una revisión de los estados, sectores y tamaños seleccionados desde la primera página. Se detendrá al alcanzar el límite; después usa Reanudar. Conserva notas, contactos e historial."}button{class:"button secondary",disabled:running||!d.denue_configured||pending>0||complete==0,onclick:move |_|{let s=consume_context::<Services>();job_start(JobKind::Recheck,ui,s.db,String::new());},"Iniciar revisión"}}
         }}
@@ -1503,79 +2099,7 @@ fn UpdatesPanel(profile: Profile) -> Element {
     }}
 }
 
-#[component]
-fn SettingsPanel() -> Element {
-    let service = consume_context::<Services>();
-    let paths = service.db.paths.clone();
-    let mut ui = use_context::<UiState>();
-    let configured = paths.secrets().unwrap_or_default();
-    let mut pane = use_signal(|| {
-        if configured.denue.is_empty() {
-            2usize
-        } else {
-            0usize
-        }
-    });
-    let mut draft = use_signal(|| ui.settings.peek().clone());
-    let mut entity_to_add = use_signal(|| "09".to_owned());
-    let mut denue = use_signal(String::new);
-    let mut inegi = use_signal(String::new);
-    let mut banxico = use_signal(String::new);
-    let mut token_epoch = use_signal(|| 0u64);
-    let backup_db = service.db.clone();
-    let save_paths = paths.clone();
-    let secret_paths = paths.clone();
-    let templates_path = paths.home.join("templates.toml");
-    let mut editing_templates = use_signal(|| false);
-    let mobile_layout = service.layout == Layout::Ios;
-    let page = mobile::destination();
-    if *editing_templates.read() || (mobile_layout && page == Destination::Templates) {
-        return rsx! { mobile::TemplateEditor { onclose:move |_|{editing_templates.set(false);mobile::back();} } };
-    }
-    rsx! {div{class:"settings-work",
-            if mobile_layout && page==Destination::Root {mobile::PageMenu{pages:vec![Destination::Identity,Destination::Appearance,Destination::Goals,Destination::DataPreferences,Destination::Credentials,Destination::Backup,Destination::Templates]}}
-            if !mobile_layout {PanelTabs{labels:vec!["General","Datos","Fuentes"],active:pane,name:"Ajustes personales"}}div{class:"settings-grid",
-                section{class:"panel preferences-panel",hidden:if mobile_layout {!matches!(page,Destination::Identity|Destination::Appearance|Destination::Goals|Destination::DataPreferences)}else{*pane.read()==2},div{class:"form-body",
-                    div{hidden:if mobile_layout {!matches!(page,Destination::Identity|Destination::Appearance|Destination::Goals)}else{*pane.read()!=0},
-    div{hidden:mobile_layout && page!=Destination::Identity,                    div{class:"form-row",label{"Nombre del remitente" TextEntry{initial:draft.read().owner_name.clone(),oninput:move|e:FormEvent|draft.write().owner_name=e.value()}}label{"WhatsApp de tu firma" TextEntry{initial:draft.read().owner_whatsapp.clone(),oninput:move|e:FormEvent|draft.write().owner_whatsapp=e.value()}}}
-                        label{"Credencial comprobable" TextEntry{multiline:true,initial:draft.read().owner_credential.clone(),oninput:move|e:FormEvent|draft.write().owner_credential=e.value()}}
-    }                    label{hidden:mobile_layout && page!=Destination::Appearance,"Apariencia" select{value:draft.read().theme.clone(),onchange:move|e|draft.write().theme=e.value(),option{value:"light","Claro"}option{value:"dark","Oscuro"}}}
-    div{hidden:mobile_layout && page!=Destination::Goals,                    h3{"Metas diarias"}div{class:"goals-settings",label{"Revisar" TextEntry{kind:"number",initial:draft.read().daily_research.to_string(),oninput:move|e:FormEvent|draft.write().daily_research=e.value().parse().unwrap_or(1001)}}label{"Contactar" TextEntry{kind:"number",initial:draft.read().daily_contacts.to_string(),oninput:move|e:FormEvent|draft.write().daily_contacts=e.value().parse().unwrap_or(1001)}}label{"Seguimientos" TextEntry{kind:"number",initial:draft.read().daily_followups.to_string(),oninput:move|e:FormEvent|draft.write().daily_followups=e.value().parse().unwrap_or(1001)}}}
-                        p{class:"muted small","Elige metas pequeñas. Cero desactiva una meta. Guardar aplica el tema y conserva tus preferencias al volver a abrir la app."}}
-                    }
-                    div{hidden:if mobile_layout {page!=Destination::DataPreferences}else{*pane.read()!=1},
-                        h3{"Estados de interés"}div{class:"selected-entities",for code in draft.read().entities.clone(){{let remove=code.clone();let name=prospect_core::config::entity_name(&code).to_owned();rsx!{button{class:"pill-button",aria_label:format!("Quitar estado {name}"),disabled:draft.read().entities.len()<=1,onclick:move |_|draft.write().entities.retain(|c|c!=&remove),"{name} ×"}}}}}
-                        div{class:"entity-add",select{aria_label:"Estado para añadir",value:entity_to_add.read().clone(),onchange:move|e|entity_to_add.set(e.value()),for (code,name)in prospect_core::config::ENTITIES{option{value:*code,"{name}"}}}button{class:"button secondary",disabled:draft.read().entities.contains(&entity_to_add.read()),onclick:move |_|{let code=entity_to_add.read().clone();let mut d=draft.write();if !d.entities.contains(&code){d.entities.push(code);d.entities.sort();}},"Añadir estado"}}
-                        if !mobile_layout {
-                            div{class:"territory-expansion",
-                                div{class:"expansion-heading",strong{"Expansión · 5 estados clave"}
-                                    button{class:"button secondary",disabled:prospect_core::config::DESKTOP_EXPANSION.iter().all(|(code,_)|draft.read().entities.iter().any(|e|e==code)),onclick:move |_|{let added=draft.write().add_desktop_expansion();ui.toast.set(format!("{added} estados añadidos a la selección. Guarda las preferencias para aplicarlos."));},"Añadir recomendados"}
-                                }
-                                details{summary{"Ver estados y enfoque del piloto"}
-                                    ul{for (code,reason) in prospect_core::config::DESKTOP_EXPANSION {li{strong{"{prospect_core::config::entity_name(code)}"}span{" · {reason}"}}}}
-                                }
-                                p{class:"muted small","Conserva tus estados actuales. Guardar amplía la cobertura para ambas ofertas; las consultas siguen limitadas a las páginas por clic. Para traer datos, usa Actualizaciones."}
-                            }
-                        }
-                        h3{"Tamaño del negocio"}div{class:"strata-settings",for (code,name)in [("1","0–5"),("2","6–10"),("3","11–30"),("4","31–50"),("5","51–100"),("6","101–250"),("7","251+")]{label{class:"check-label",input{r#type:"checkbox",checked:draft.read().estratos.iter().any(|c|c==code),onchange:move|e|{let mut d=draft.write();if e.checked(){if !d.estratos.iter().any(|c|c==code){d.estratos.push(code.into());}}else{d.estratos.retain(|c|c!=code);}}}"{name} personas"}}}
-                        div{class:"form-row",label{"Páginas DENUE por clic" select{value:draft.read().denue_pages.to_string(),onchange:move|e|draft.write().denue_pages=e.value().parse().unwrap_or(0),for n in 1..=20{option{value:n.to_string(),"{n} · hasta {n*200} registros"}}}}div{class:"form-helper",p{class:"muted small","Cada lote se detiene. Hasta tres intentos por página ante errores. Cambiar ajustes no descarga datos."}}}
-                        h3{"Cuándo sugerir una revisión · días"}div{class:"form-row",label{"DENUE" TextEntry{kind:"number",initial:draft.read().denue_max_age_days.to_string(),oninput:move|e:FormEvent|draft.write().denue_max_age_days=e.value().parse().unwrap_or(0)}}label{"Sitios públicos" TextEntry{kind:"number",initial:draft.read().web_max_age_days.to_string(),oninput:move|e:FormEvent|draft.write().web_max_age_days=e.value().parse().unwrap_or(0)}}}div{class:"form-row",label{"INEGI Indicadores" TextEntry{kind:"number",initial:draft.read().inegi_max_age_days.to_string(),oninput:move|e:FormEvent|draft.write().inegi_max_age_days=e.value().parse().unwrap_or(0)}}label{"Banxico" TextEntry{kind:"number",initial:draft.read().banxico_max_age_days.to_string(),oninput:move|e:FormEvent|draft.write().banxico_max_age_days=e.value().parse().unwrap_or(0)}}}
-                        button{class:"link-button",onclick:move |_|navigate(Screen::Updates,ui),"Gestionar actualizaciones →"}
-                    }
-                    div{class:"settings-save",button{class:"button primary",onclick:move |_|{let mut s=draft.read().clone();s.profile=ui.settings.peek().profile.clone();s.entities.sort();s.entities.dedup();s.estratos.sort();s.estratos.dedup();match s.save(&save_paths){Ok(())=>{ui.settings.set(s);ui.revision+=1;ui.toast.set("Preferencias guardadas. Las fuentes se actualizan sólo con botones.".into());},Err(e)=>ui.toast.set(e.to_string())}},if mobile_layout {"Guardar"} else {"Guardar preferencias"}}button{class:"link-button small",hidden:mobile_layout,onclick:move |_|{if mobile_layout{editing_templates.set(true);}else if let Err(e)=open_file(&templates_path){ui.toast.set(format!("No se pudo abrir la plantilla: {e}"));}},"Editar plantillas ↗"}}
-                }}
-                section{class:"panel",hidden:if mobile_layout {!matches!(page,Destination::Credentials|Destination::Backup)}else{*pane.read()!=2},div{class:"panel-heading",hidden:mobile_layout,h2{"Tus credenciales y respaldo"}}div{class:"form-body",div{hidden:mobile_layout && page!=Destination::Credentials,p{class:"muted small","Usa tus propios tokens. Se guardan fuera de la aplicación. Deja un campo vacío para conservar el configurado; guardar no consulta las APIs."}button{class:"link-button",onclick:move |_|{if let Err(e)=open_link("https://www.inegi.org.mx/servicios/api_denue.html"){ui.toast.set(e);}},"Obtener token DENUE en INEGI ↗"}
-                    label{"DENUE" TextEntry{key:"denue:{token_epoch}",kind:"password",placeholder:if configured.denue.is_empty(){"Sin configurar"}else{"Configurado"},initial:String::new(),oninput:move|e:FormEvent|denue.set(e.value())}}
-                    label{"INEGI Indicadores" TextEntry{key:"inegi:{token_epoch}",kind:"password",placeholder:if configured.inegi.is_empty(){"Usar token DENUE"}else{"Configurado"},initial:String::new(),oninput:move|e:FormEvent|inegi.set(e.value())}}
-                    label{"Banxico SIE" TextEntry{key:"banxico:{token_epoch}",kind:"password",placeholder:if configured.banxico.is_empty(){"Sin configurar"}else{"Configurado"},initial:String::new(),oninput:move|e:FormEvent|banxico.set(e.value())}}
-                    button{class:"button secondary",disabled:denue.read().trim().is_empty()&&inegi.read().trim().is_empty()&&banxico.read().trim().is_empty(),onclick:move |_|{match secret_paths.secrets(){Ok(mut s)=>{if !denue.read().is_empty(){s.denue=denue.read().trim().to_owned();if inegi.read().is_empty(){s.inegi=s.denue.clone();}}
-        if !inegi.read().is_empty(){s.inegi=inegi.read().trim().to_owned();}
-        if !banxico.read().is_empty(){s.banxico=banxico.read().trim().to_owned();}match secret_paths.write_secrets(&s){Ok(())=>{denue.set(String::new());inegi.set(String::new());banxico.set(String::new());token_epoch+=1;ui.toast.set("Tokens guardados en tu directorio personal".into());ui.revision+=1;},Err(e)=>ui.toast.set(e.to_string())}},Err(e)=>ui.toast.set(e.to_string())}},"Guardar tokens"}
-    }div{hidden:mobile_layout && page!=Destination::Backup,                div{class:"action-row",hidden:mobile_layout,button{class:"link-button",onclick:move |_|pane.set(1),"Elegir estados y límites →"}button{class:"link-button",onclick:move |_|navigate(Screen::Updates,ui),"Ir a descargar datos →"}}h3{"Base personal"}p{class:"muted small path","{paths.db.display()}"}button{class:"button secondary",onclick:move |_|{let db=backup_db.clone();spawn(async move{match db.backup().await{Ok(path)=>ui.toast.set(available_file(path).unwrap_or_else(|e|e)),Err(e)=>ui.toast.set(e.to_string())}});},"Crear respaldo"}
-                    p{class:"muted small","La app conserva datos y ajustes fuera del paquete. Una instalación nueva comienza sin datos ni tokens; tu edición personal mantiene los existentes."}}
-                }}
-            }}}
-}
+use settings::SettingsPanel;
 
 #[cfg(test)]
 mod review_tests {
@@ -1595,6 +2119,7 @@ mod review_tests {
         dom.rebuild_in_place();
         let html = dioxus_ssr::render(&dom);
         assert!(html.contains("Cargando la base"));
+        assert!(html.contains("loading-spinner"));
         let html = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 dom.wait_for_work().await;
@@ -1650,5 +2175,240 @@ mod review_tests {
         ] {
             assert_eq!(indicator_value(input), expected);
         }
+    }
+
+    fn make_test_ui_state(services: &crate::Services, settings_tab: usize) -> super::UiState {
+        super::UiState {
+            screen: Signal::new(super::Screen::Settings),
+            settings_tab: Signal::new(settings_tab),
+            query: Signal::new(super::Query::default()),
+            selected: Signal::new(String::new()),
+            revision: Signal::new(0),
+            settings: Signal::new(services.settings.clone()),
+            job: Signal::new(None),
+            job_minimized: Signal::new(false),
+            dismissed_job_id: Signal::new(String::new()),
+            heavy_task: Signal::new(None),
+            toast: Signal::new(String::new()),
+            notifications: Signal::new(Vec::new()),
+            notif_seq: Signal::new(0),
+            busy: Signal::new(false),
+            pending: Signal::new(None),
+            mobile_layout: services.layout == crate::Layout::Ios,
+        }
+    }
+
+    #[component]
+    fn OverlayProbe() -> Element {
+        let services = consume_context::<crate::Services>();
+        use_context_provider(|| make_test_ui_state(&services, 0));
+        let state = prospect_core::jobs::JobState {
+            id: "job-1".into(),
+            kind: "DENUE · actualizar todo".into(),
+            status: "running".into(),
+            message: "Descargando Ciudad de México…".into(),
+            pages: 2,
+            total: 4,
+            requests: 3,
+            ..Default::default()
+        };
+        rsx! { super::JobLoadingOverlay { state, running: true } }
+    }
+
+    #[component]
+    fn NotificationProbe() -> Element {
+        let services = consume_context::<crate::Services>();
+        let mut ui = make_test_ui_state(&services, 0);
+        ui.job_minimized.set(true);
+        ui.notifications.set(vec![super::FloatingNotification {
+            id: 1,
+            message: "Preferencias guardadas.".into(),
+            is_error: false,
+        }]);
+        use_context_provider(|| ui);
+        let state = prospect_core::jobs::JobState {
+            id: "job-2".into(),
+            kind: "Actualizar todo".into(),
+            status: "running".into(),
+            message: "Analizando 1 de 2…".into(),
+            processed: 1,
+            total: 2,
+            analyzing: true,
+            requests: 4,
+            ..Default::default()
+        };
+        let job_state = Signal::new(state.clone());
+        rsx! { super::NotificationCenter { state, running: true, job_state } }
+    }
+
+    #[test]
+    fn job_loading_overlay_and_floating_notifications_render_animated_progress() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = prospect_core::AppPaths::at(temp.path()).unwrap();
+        let settings = prospect_core::Settings::load_desktop(&paths).unwrap_or_default();
+        let db = prospect_core::Db::open(paths).unwrap();
+        let mut dom = VirtualDom::new(OverlayProbe).with_root_context(crate::Services {
+            db: db.clone(),
+            settings: settings.clone(),
+            layout: crate::Layout::Desktop,
+        });
+        dom.rebuild_in_place();
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("loading-backdrop"));
+        assert!(html.contains("loading-spinner"));
+        assert!(html.contains("animateTransform"));
+        assert!(html.contains("progress-track"));
+        assert!(html.contains("50%"));
+        assert!(html.contains("Descargando Ciudad de México…"));
+        assert!(html.contains("Consultas enviadas: 3"));
+        assert!(html.contains("Seguir en segundo plano"));
+        assert!(html.contains("Cancelar"));
+
+        let mut notif_dom = VirtualDom::new(NotificationProbe).with_root_context(crate::Services {
+            db,
+            settings,
+            layout: crate::Layout::Desktop,
+        });
+        notif_dom.rebuild_in_place();
+        let notif_html = dioxus_ssr::render(&notif_dom);
+        assert!(notif_html.contains("toast-stack"));
+        assert!(notif_html.contains("toast-job"));
+        assert!(notif_html.contains("progress-track"));
+        assert!(notif_html.contains("50%"));
+        assert!(notif_html.contains("Preferencias guardadas."));
+        assert!(notif_html.contains("Ampliar"));
+    }
+
+    #[derive(Clone, Copy, PartialEq, Props)]
+    struct SettingsProbeProps {
+        tab: usize,
+    }
+
+    #[component]
+    fn SettingsProbe(props: SettingsProbeProps) -> Element {
+        let services = consume_context::<crate::Services>();
+        use_context_provider(|| Signal::new(super::ViewCache::default()));
+        use_context_provider(|| make_test_ui_state(&services, props.tab));
+        rsx! { super::SettingsPanel {} }
+    }
+
+    #[tokio::test]
+    async fn settings_panel_renders_renamed_tabs_template_editor_and_auto_update() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = prospect_core::AppPaths::at(temp.path()).unwrap();
+        crate::onboarding::save_tokens(&paths, "tok-denue-test", "", "", true).unwrap();
+        let settings = prospect_core::Settings::load_desktop(&paths).unwrap();
+        assert!(settings.entities.iter().any(|e| e == "09"));
+        let db = prospect_core::Db::open(paths).unwrap();
+        assert!(temp.path().join("templates.toml").is_file());
+
+        // Tab 0: Perfil + un solo lienzo de plantillas con modo edición / vista previa
+        let mut dom0 = VirtualDom::new_with_props(SettingsProbe, SettingsProbeProps { tab: 0 })
+            .with_root_context(crate::Services {
+                db: db.clone(),
+                settings: settings.clone(),
+                layout: crate::Layout::Desktop,
+            });
+        dom0.rebuild_in_place();
+        let html0 = dioxus_ssr::render(&dom0);
+        assert!(html0.contains("Perfil y preferencias"));
+        assert!(html0.contains("Base de datos y alcance"));
+        assert!(html0.contains("Tokens y fuentes"));
+        assert!(html0.contains(">Perfil<"));
+        assert!(!html0.contains("Tu firma y metas"));
+        assert!(html0.contains("Tus datos en plantillas"));
+        assert!(html0.contains("Tu credencial"));
+        assert!(html0.contains("Metas diarias"));
+        assert!(html0.contains(">Editar<"));
+        assert!(html0.contains(">Vista previa<"));
+        for category in [
+            "WhatsApp",
+            "Asuntos de correo",
+            "Correos",
+            "Seguimientos",
+            "Giros",
+        ] {
+            assert!(html0.contains(category), "{category}");
+        }
+        assert!(html0.contains("Mensaje 10"));
+        assert!(html0.contains("st-canvas-text"));
+        assert_eq!(
+            html0.matches("<textarea").count(),
+            2,
+            "one canvas plus the credential"
+        );
+        assert!(html0.contains("Nuevo dato"));
+        assert!(html0.contains("[Tu nombre]"));
+        assert!(html0.contains("Guardar cambios"));
+        assert!(!html0.contains("Cambios sin guardar"));
+        assert!(!html0.contains("Bloque 1"));
+        assert!(!html0.contains("Restaurar predeterminadas"));
+        assert!(!html0.contains(">TOML<"));
+        assert!(!html0.contains("Archivo local:"));
+        assert!(!html0.contains("{nombre}"));
+        assert!(!html0.contains("Audi México"));
+
+        // Tab 1: Base de datos y alcance + Auto-update + Unified updates
+        let mut dom1 = VirtualDom::new_with_props(SettingsProbe, SettingsProbeProps { tab: 1 })
+            .with_root_context(crate::Services {
+                db: db.clone(),
+                settings: settings.clone(),
+                layout: crate::Layout::Desktop,
+            });
+        dom1.rebuild_in_place();
+        let initial_html1 = dioxus_ssr::render(&dom1);
+        assert!(initial_html1.contains(">Alcance<"));
+        assert!(initial_html1.contains("1 estado elegido"));
+        assert_eq!(initial_html1.matches("st-state active").count(), 1);
+        assert_eq!(initial_html1.matches("st-state-name").count(), 32);
+        assert!(initial_html1.contains("Ciudad de México"));
+        assert!(initial_html1.contains("Sugeridos"));
+        assert!(initial_html1.contains("Tamaño del negocio"));
+        assert!(initial_html1.contains("Pequeña"));
+        assert!(initial_html1.contains("Actualización automática"));
+        assert!(initial_html1.contains("Sólo manual"));
+        assert!(!initial_html1.contains("Días para sugerir revisión"));
+        assert!(initial_html1.contains("loading-spinner"));
+        assert!(!initial_html1.contains("Páginas DENUE por clic"));
+        let html1 = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                dom1.render_immediate_to_vec();
+                let html = dioxus_ssr::render(&dom1);
+                if html.contains("Por explorar") {
+                    return html;
+                }
+                dom1.wait_for_work().await;
+            }
+        })
+        .await
+        .expect("tab 1 updates should resolve");
+        assert!(html1.contains("Actualizar todo"));
+        assert!(!html1.contains("Registros por actualización"));
+        assert!(!html1.contains("Volver a consultar estados ya revisados"));
+        assert!(html1.contains(">Historial<"));
+        assert!(html1.contains("Crear respaldo"));
+        assert!(html1.contains("Por explorar"));
+        assert!(!html1.contains("Importar nuevos"));
+        assert!(!html1.contains("Reanudar pendientes"));
+        assert!(!html1.contains("Revisar sitios"));
+
+        // Tab 2: Tokens y fuentes
+        let mut dom2 = VirtualDom::new_with_props(SettingsProbe, SettingsProbeProps { tab: 2 })
+            .with_root_context(crate::Services {
+                db,
+                settings,
+                layout: crate::Layout::Desktop,
+            });
+        dom2.rebuild_in_place();
+        let html2 = dioxus_ssr::render(&dom2);
+        assert!(html2.contains(">Tokens<"));
+        assert!(!html2.contains("Tokens locales"));
+        assert!(!html2.contains("0600"));
+        assert!(html2.contains("st-status ok"));
+        assert!(html2.contains("Mostrar token"));
+        assert!(html2.contains("Verificar y guardar"));
+        assert!(html2.contains(">Respaldo<"));
+        assert!(html2.contains("Crear respaldo"));
+        assert!(!html2.contains(&temp.path().display().to_string()));
     }
 }

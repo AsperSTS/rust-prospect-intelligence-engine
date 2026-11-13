@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use dioxus::prelude::*;
 use prospect_core::{AppPaths, Db, Settings};
 use prospect_ui::{self as ui, Layout, Services};

@@ -14,14 +14,28 @@ pub(super) fn StateImportAction(
 ) -> Element {
     let ui = use_context::<UiState>();
     let db = consume_context::<Services>().db;
-    let label = if pending > 0 {
-        "Reanudar"
-    } else if new > 0 {
-        "Importar"
+    let has_work = pending > 0 || new > 0;
+    let label = if has_work {
+        "Actualizar"
     } else {
-        "Consultado"
+        "Al día ✓"
     };
-    rsx! {button{class:"button secondary compact",disabled:running||!configured||(pending==0&&new==0),aria_label:format!("{label} datos de {}",prospect_core::config::entity_name(&entity)),onclick:move |_|job_start_scoped(if pending>0{JobKind::Resume}else{JobKind::Import},ui,db.clone(),String::new(),Some(entity.clone())),"{label}"}}
+    rsx! {
+        button {
+            class: if has_work { "button secondary compact" } else { "button secondary compact state-done-btn" },
+            disabled: running || !configured || !has_work,
+            aria_label: format!("{label} datos de {}", prospect_core::config::entity_name(&entity)),
+            onclick: move |_| job_start_sync(
+                ui,
+                db.clone(),
+                Some(vec![entity.clone()]),
+                false,
+                true,
+                Some(format!("Actualizar · {}", prospect_core::config::entity_name(&entity))),
+            ),
+            "{label}"
+        }
+    }
 }
 
 #[component]
@@ -93,7 +107,7 @@ pub(super) fn TableControls(mut query: Signal<Query>, mut layout: Signal<TableLa
 }
 
 #[component]
-pub(super) fn BatchHistory(profile: Profile) -> Element {
+pub(super) fn BatchHistory(profile: Profile, #[props(default)] embedded: bool) -> Element {
     let ui = use_context::<UiState>();
     let db = consume_context::<Services>().db;
     let batches = use_resource(move || {
@@ -106,8 +120,8 @@ pub(super) fn BatchHistory(profile: Profile) -> Element {
         }
     });
     let state = batches.read().clone();
-    rsx! {section{class:"panel batch-history",
-        div{class:"panel-heading",h2{"Cambios por lote · DENUE"}span{class:"muted small","Últimos 20 de esta oferta"}}
+    rsx! {section{class:if embedded{"batch-history embedded"}else{"panel batch-history"},
+        if !embedded {div{class:"panel-heading",h2{"Cambios por lote · DENUE"}span{class:"muted small","Últimos 20 de esta oferta"}}}
         div{class:"batch-history-body",
             match state {
                 None=>rsx!{p{role:"status","Cargando lotes…"}},

@@ -7,7 +7,75 @@ use std::time::Duration;
 pub struct GovernmentClient {
     client: Client,
 }
+/// Outcome of a single explicit token probe against the official source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenCheck {
+    Valid,
+    Rejected,
+    /// The source did not answer; the token was neither confirmed nor rejected.
+    Unreachable,
+}
+/// DENUE answers HTTP 200 with a plain message for unknown tokens; only an array is a real answer.
+pub fn classify_denue(status: u16, body: &[u8]) -> TokenCheck {
+    if status == 429 || status >= 500 {
+        return TokenCheck::Unreachable;
+    }
+    match serde_json::from_slice::<Value>(body) {
+        Ok(Value::Array(_)) if (200..300).contains(&status) => TokenCheck::Valid,
+        _ => TokenCheck::Rejected,
+    }
+}
+pub fn classify_banxico(status: u16, body: &[u8]) -> TokenCheck {
+    if status == 429 || status >= 500 {
+        return TokenCheck::Unreachable;
+    }
+    match serde_json::from_slice::<Value>(body) {
+        Ok(value) if (200..300).contains(&status) && value["bmx"].is_object() => TokenCheck::Valid,
+        _ => TokenCheck::Rejected,
+    }
+}
 impl GovernmentClient {
+    /// One bounded request, no retries: `None` means the source could not be reached.
+    async fn probe(&self, url: String, banxico: Option<&str>) -> Option<(u16, Vec<u8>)> {
+        let mut request = self.client.get(url).timeout(Duration::from_secs(20));
+        if let Some(token) = banxico {
+            let mut header = reqwest::header::HeaderValue::from_str(token).ok()?;
+            header.set_sensitive(true);
+            request = request.header("Bmx-Token", header);
+        }
+        let response = request.send().await.ok()?;
+        let status = response.status().as_u16();
+        if response.content_length().is_some_and(|n| n > 2_000_000) {
+            return None;
+        }
+        let body = response.bytes().await.ok()?;
+        (body.len() <= 2_000_000).then(|| (status, body.to_vec()))
+    }
+    /// Confirms a DENUE token with one small count query. Runs only on explicit user action.
+    pub async fn check_denue(&self, token: &str) -> TokenCheck {
+        if !crate::config::token_shape_ok(token) {
+            return TokenCheck::Rejected;
+        }
+        let url = format!(
+            "https://www.inegi.org.mx/app/api/denue/v1/consulta/Cuantificar/46/09/7/{token}"
+        );
+        match self.probe(url, None).await {
+            Some((status, body)) => classify_denue(status, &body),
+            None => TokenCheck::Unreachable,
+        }
+    }
+    /// Confirms a Banxico SIE token with the latest FIX observation.
+    pub async fn check_banxico(&self, token: &str) -> TokenCheck {
+        if !crate::config::token_shape_ok(token) {
+            return TokenCheck::Rejected;
+        }
+        let url =
+            "https://www.banxico.org.mx/SieAPIRest/service/v1/series/SF43718/datos/oportuno".into();
+        match self.probe(url, Some(token)).await {
+            Some((status, body)) => classify_banxico(status, &body),
+            None => TokenCheck::Unreachable,
+        }
+    }
     pub fn new() -> Result<Self> {
         Ok(Self {
             client: Client::builder()
@@ -214,7 +282,7 @@ impl GovernmentClient {
                     unit: s["UNIT"].as_str().unwrap_or("").into(),
                     description: format!(
                         "Indicador {indicator} · área {} · unidad {}",
-                        s["OBSERVATIONS"][0]["COBER_GEO"].as_str().unwrap_or("0700"),
+                        p["COBER_GEO"].as_str().unwrap_or("0700"),
                         s["UNIT"].as_str().unwrap_or("")
                     ),
                     updated_at: crate::config::now(),
@@ -400,4 +468,36 @@ pub async fn sync_economics(
     )
     .await?;
     result
+}
+
+#[cfg(test)]
+mod token_check_tests {
+    use super::*;
+
+    #[test]
+    fn official_rejections_and_outages_are_told_apart() {
+        // Observed DENUE answer for an unknown token: HTTP 200 with a plain JSON string.
+        let denied = "\"No autorizado. Utilice una clave válida.\"".as_bytes();
+        assert_eq!(classify_denue(200, denied), TokenCheck::Rejected);
+        assert_eq!(
+            classify_denue(200, b"[{\"Total\":\"3\"}]"),
+            TokenCheck::Valid
+        );
+        assert_eq!(classify_denue(503, b""), TokenCheck::Unreachable);
+        assert_eq!(classify_denue(429, b"[]"), TokenCheck::Unreachable);
+        let invalid = "{\"error\":{\"mensaje\":\"Token inválido\"}}".as_bytes();
+        assert_eq!(classify_banxico(400, invalid), TokenCheck::Rejected);
+        assert_eq!(
+            classify_banxico(200, b"{\"bmx\":{\"series\":[]}}"),
+            TokenCheck::Valid
+        );
+        assert_eq!(classify_banxico(500, b""), TokenCheck::Unreachable);
+    }
+
+    #[tokio::test]
+    async fn malformed_tokens_are_rejected_without_any_request() {
+        let client = GovernmentClient::new().unwrap();
+        assert_eq!(client.check_denue("a/b").await, TokenCheck::Rejected);
+        assert_eq!(client.check_banxico("corto").await, TokenCheck::Rejected);
+    }
 }

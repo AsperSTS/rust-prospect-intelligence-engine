@@ -7,22 +7,71 @@ use std::{
     sync::LazyLock,
 };
 
-#[derive(Clone, serde::Deserialize)]
+pub const BUNDLED_TEMPLATES: &str = include_str!("../../../config/templates.toml");
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Templates {
     pub whatsapp: BTreeMap<String, String>,
     pub email: BTreeMap<String, String>,
     pub seguimiento: BTreeMap<String, String>,
     pub giros: BTreeMap<String, BTreeMap<String, String>>,
+    /// Reusable user data: visible label → value. Templates reference it as `{data_key(label)}`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub datos: BTreeMap<String, String>,
+}
+
+/// Placeholder names owned by the application; user data cannot shadow them.
+pub const RESERVED_KEYS: [&str; 10] = [
+    "nombre",
+    "owner",
+    "owner_corto",
+    "credencial",
+    "whatsapp",
+    "giro_corto",
+    "cosa",
+    "pregunta",
+    "ejemplo",
+    "obs",
+];
+
+/// Placeholder key for a reusable datum: lowercase words joined by `_`.
+pub fn data_key(label: &str) -> String {
+    label
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
 }
 
 impl Templates {
+    pub fn bundled_source() -> &'static str {
+        BUNDLED_TEMPLATES
+    }
+
+    pub fn ensure_file(home: &Path) -> Result<std::path::PathBuf> {
+        let path = home.join("templates.toml");
+        if !path.exists() {
+            crate::config::write_private(&path, BUNDLED_TEMPLATES.as_bytes())?;
+        }
+        Ok(path)
+    }
+
     pub fn source(home: &Path) -> Result<String> {
         let path = home.join("templates.toml");
         Ok(if path.exists() {
             std::fs::read_to_string(path)?
         } else {
-            include_str!("../../../config/templates.toml").into()
+            BUNDLED_TEMPLATES.into()
         })
+    }
+
+    pub fn parse_toml(source: &str) -> Result<Self> {
+        Ok(toml::from_str(source)?)
+    }
+
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(self).map_err(|e| invalid(e.to_string()))
     }
 
     pub fn load(home: &Path) -> Result<Self> {
@@ -68,6 +117,22 @@ impl Templates {
         {
             return Err(invalid("Plantillas por giro incompletas"));
         }
+        let mut seen = BTreeSet::new();
+        for (label, value) in &self.datos {
+            let key = data_key(label);
+            if key.is_empty()
+                || label.chars().count() > 40
+                || label.contains(['[', ']', '{', '}'])
+                || value.chars().count() > 500
+                || RESERVED_KEYS.contains(&key.as_str())
+                || !seen.insert(key)
+            {
+                return Err(invalid(format!("Dato reutilizable inválido: {label}")));
+            }
+        }
+        if self.datos.len() > 30 {
+            return Err(invalid("Demasiados datos reutilizables (máximo 30)"));
+        }
         Ok(())
     }
 }
@@ -78,8 +143,9 @@ pub fn clean_name(raw: &str) -> String {
     });
     static BRANCH: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\b(?:SUCURSAL|SUC\.?)(?:\s|$)").unwrap());
-    let raw = BRANCH.find(raw).map(|m| &raw[..m.start()]).unwrap_or(raw);
-    let mut value = raw
+    // Keep `raw` intact: a name that starts with "SUCURSAL" must fall back to itself.
+    let head = BRANCH.find(raw).map(|m| &raw[..m.start()]).unwrap_or(raw);
+    let mut value = head
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -91,10 +157,51 @@ pub fn clean_name(raw: &str) -> String {
             .trim_matches([' ', ',', '.', '-'])
             .into();
     }
-    if value.is_empty() {
+    let mut words = Vec::new();
+    for (i, w) in value.split(' ').enumerate() {
+        let base = w.trim_matches(['.', ',']).to_lowercase();
+        let chars = w.chars().collect::<Vec<_>>();
+        let acronym = !chars.is_empty()
+            && chars.iter().all(|c| c.is_alphabetic() && c.is_uppercase())
+            && ![
+                "san", "sur", "luz", "oro", "rio", "gas", "sol", "mar", "pan", "uno", "dos", "sin",
+                "mas", "una", "ver", "mex", "don", "doña",
+            ]
+            .contains(&base.as_str())
+            && (chars.len() <= 3
+                || (chars.len() == 4
+                    && !"AEIOU".contains(chars[0])
+                    && !"AEIOU".contains(chars[1])
+                    && ![
+                        "pl", "pr", "bl", "br", "cl", "cr", "dr", "fl", "fr", "gl", "gr", "tr",
+                        "ch", "ll", "rr",
+                    ]
+                    .contains(&base.chars().take(2).collect::<String>().as_str())));
+        let allcase = w == w.to_uppercase() || w == w.to_lowercase();
+        let shown = if i > 0
+            && [
+                "de", "del", "la", "las", "los", "el", "y", "e", "en", "para", "por", "con", "al",
+            ]
+            .contains(&base.as_str())
+        {
+            base
+        } else if acronym {
+            w.to_owned()
+        } else if allcase {
+            let mut cs = w.chars();
+            cs.next()
+                .map(|c| c.to_uppercase().collect::<String>() + &cs.as_str().to_lowercase())
+                .unwrap_or_default()
+        } else {
+            w.to_owned()
+        };
+        words.push(shown);
+    }
+    let formatted = words.join(" ");
+    if formatted.is_empty() {
         crate::rules::title(raw)
     } else {
-        crate::rules::title(&value)
+        formatted
     }
 }
 
@@ -104,7 +211,9 @@ fn hash_mod(id: &str, modulus: usize) -> usize {
     }
     Sha1::digest(id.as_bytes())
         .iter()
-        .fold(0usize, |result, byte| (result * 256 + usize::from(*byte)) % modulus)
+        .fold(0usize, |result, byte| {
+            (result * 256 + usize::from(*byte)) % modulus
+        })
 }
 
 fn choose_key(keys: Vec<String>, id: &str, salt: &str) -> Option<String> {
@@ -193,6 +302,9 @@ fn vars(
         .get(&p.giro)
         .unwrap_or(&templates.giros["Otro"]);
     let mut values = giro.clone();
+    for (label, value) in &templates.datos {
+        values.insert(data_key(label), value.clone());
+    }
     values.insert("nombre".into(), clean_name(&p.nombre));
     values.insert(
         "giro_corto".into(),
@@ -225,15 +337,22 @@ fn vars(
 
 fn render(source: &str, values: &BTreeMap<String, String>) -> String {
     static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\w+)\}").unwrap());
-    PLACEHOLDER
+    let mut rendered = PLACEHOLDER
         .replace_all(source, |captures: &Captures| {
             values
                 .get(&captures[1])
                 .cloned()
                 .unwrap_or_else(|| captures[0].into())
         })
-        .trim()
-        .into()
+        .to_string();
+    if values.get("whatsapp").is_some_and(|w| w.trim().is_empty()) {
+        rendered = rendered
+            .lines()
+            .filter(|line| line.trim() != "WhatsApp:")
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    rendered.trim().into()
 }
 
 pub fn first(
@@ -274,12 +393,17 @@ pub fn first(
             }
         } else {
             let subject = format!("Pregunta sobre el sitio de {}", values["nombre"]);
+            let whatsapp_line = if values["whatsapp"].trim().is_empty() {
+                String::new()
+            } else {
+                format!("\nWhatsApp: {}", values["whatsapp"])
+            };
             Message {
                 canal: channel.into(),
                 variante: "WEB-EM-A".into(),
                 cuerpo: format!(
-                    "Buen día,\n\nSoy {}. Desarrollo sitios web y herramientas para captar clientes. Estuve revisando a {} y quería hacerles una pregunta:\n\n{question}\n\nSi tiene sentido revisarlo, puedo mostrarles un ejemplo sencillo por este medio.\n\nSaludos,\n{}\nWhatsApp: {}",
-                    values["owner"], values["nombre"], values["owner"], values["whatsapp"]
+                    "Buen día,\n\nSoy {}. Desarrollo sitios web y herramientas para captar clientes. Estuve revisando a {} y quería hacerles una pregunta:\n\n{question}\n\nSi tiene sentido revisarlo, puedo mostrarles un ejemplo sencillo por este medio.\n\nSaludos,\n{}{}",
+                    values["owner"], values["nombre"], values["owner"], whatsapp_line
                 ),
                 asunto: if subject.chars().count() <= 60 {
                     subject
@@ -450,9 +574,7 @@ pub fn validate(
                 "Asunto largo: {length} caracteres (máx. 70, ideal ≤ 60)"
             ));
         } else if length > 60 {
-            errors.push(format!(
-                "Aviso: asunto de {length} caracteres (ideal ≤ 60)"
-            ));
+            errors.push(format!("Aviso: asunto de {length} caracteres (ideal ≤ 60)"));
         }
         if text.contains('<') && text.contains('>') {
             errors.push("Contiene HTML".into());
@@ -484,7 +606,17 @@ mod editor_tests {
 
     #[test]
     fn bundled_templates_offer_real_message_variety() {
-        let templates: Templates = toml::from_str(include_str!("../../../config/templates.toml")).unwrap();
+        let raw = Templates::bundled_source();
+        assert!(!raw.contains("Audi México"));
+        assert!(!raw.contains("Yael"));
+        assert!(!raw.contains("954"));
+        let templates: Templates = toml::from_str(raw).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let path = Templates::ensure_file(temp.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+        std::fs::write(&path, "personal").unwrap();
+        Templates::ensure_file(temp.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "personal");
         assert!(templates.whatsapp.len() >= 10);
         assert!(keys_with_prefix(&templates.email, "asunto_").len() >= 10);
         assert!(keys_with_prefix(&templates.email, "cuerpo_con_").len() >= 10);
@@ -499,5 +631,25 @@ mod editor_tests {
                     >= 10
             );
         }
+    }
+
+    #[test]
+    fn names_that_start_with_a_branch_word_keep_their_text_and_data_fills_messages() {
+        assert_eq!(clean_name("SUCURSAL CENTRO"), "Sucursal Centro");
+        assert_eq!(clean_name("SUCURSAL PUEBLA NORTE"), "Sucursal Puebla Norte");
+        assert_eq!(clean_name("TALLER ALFA SUCURSAL SUR"), "Taller Alfa");
+        assert_eq!(data_key("Mi empresa"), "mi_empresa");
+        let mut templates = Templates::parse_toml(Templates::bundled_source()).unwrap();
+        templates
+            .datos
+            .insert("Mi empresa".into(), "Soluciones del Valle".into());
+        templates.validate().unwrap();
+        let values = vars(&Prospect::default(), &Settings::default(), &templates, "");
+        assert_eq!(
+            render("Soy de {mi_empresa}.", &values),
+            "Soy de Soluciones del Valle."
+        );
+        templates.datos.insert("owner".into(), "x".into());
+        assert!(templates.validate().is_err());
     }
 }

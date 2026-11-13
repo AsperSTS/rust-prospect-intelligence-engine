@@ -12,6 +12,7 @@ graphify-out/
 .DS_Store
 
 /dist/
+/release-assets/
 /qa/
 /qa-data/
 dependency-metadata*.json

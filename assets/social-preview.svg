@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0A1820"/>
+      <stop offset="55%" stop-color="#102632"/>
+      <stop offset="100%" stop-color="#0C1E27"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="950" cy="320" r="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#65CDB1" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#65CDB1" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#234A57"/>
+      <stop offset="55%" stop-color="#142F3B"/>
+      <stop offset="100%" stop-color="#10242F"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#B6F3D9"/>
+      <stop offset="100%" stop-color="#65CDB1"/>
+    </linearGradient>
+    <linearGradient id="barGrad" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#0F766E"/>
+      <stop offset="100%" stop-color="#65CDB1"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#93E1C5" fill-opacity="0.08"/>
+    </pattern>
+  </defs>
+
+  <!-- Fondo completo -->
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <!-- Zona segura: x [88..1192], y [88..552] -->
+
+  <!-- Encabezado con ícono y nombre del repo -->
+  <g transform="translate(90, 108)">
+    <g transform="scale(0.068)">
+      <rect x="0" y="0" width="832" height="832" rx="184" fill="url(#surface)"/>
+      <rect x="4" y="4" width="824" height="824" rx="180" fill="none" stroke="#547F88" stroke-opacity="0.65" stroke-width="10"/>
+      <path d="M500 490 L658 648" fill="none" stroke="url(#mint)" stroke-width="76" stroke-linecap="round"/>
+      <circle cx="356" cy="346" r="174" fill="none" stroke="url(#mint)" stroke-width="62"/>
+      <rect x="246" y="346" width="48" height="88" rx="16" fill="#73D2B5"/>
+      <rect x="332" y="298" width="48" height="136" rx="16" fill="#93E1C5"/>
+      <rect x="418" y="250" width="48" height="184" rx="16" fill="#B6F3D9"/>
+    </g>
+    <text x="76" y="24" font-family="Menlo, Monaco, monospace" font-size="18" fill="#65CDB1">AsperSTS /</text>
+    <text x="76" y="48" font-family="Menlo, Monaco, monospace" font-size="18" font-weight="700" fill="#E2E8F0">rust-prospect-intelligence-engine</text>
+  </g>
+
+  <!-- Título principal -->
+  <text x="90" y="250" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="60" font-weight="700" fill="#F8FAFC" letter-spacing="-1">Prospect</text>
+  <text x="90" y="316" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="60" font-weight="700" fill="#93E1C5" letter-spacing="-1">Intelligence</text>
+
+  <!-- Subtítulo exacto solicitado -->
+  <text x="90" y="378" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="22.5" fill="#CBD5E1">Prospección local con datos públicos</text>
+  <text x="90" y="410" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="22.5" fill="#CBD5E1">del INEGI, con scoring y CRM integrado.</text>
+
+  <!-- Pills limpios: Rust, SQLite y Mac Release -->
+  <g transform="translate(90, 470)" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="16" font-weight="600">
+    <!-- Rust -->
+    <rect x="0" y="0" width="88" height="40" rx="10" fill="#163542" stroke="#2D5A69" stroke-width="1.5"/>
+    <circle cx="23" cy="20" r="4.5" fill="#FDBA74"/>
+    <text x="53" y="26" text-anchor="middle" fill="#F8FAFC">Rust</text>
+
+    <!-- SQLite -->
+    <rect x="104" y="0" width="104" height="40" rx="10" fill="#163542" stroke="#2D5A69" stroke-width="1.5"/>
+    <circle cx="127" cy="20" r="4.5" fill="#93C5FD"/>
+    <text x="165" y="26" text-anchor="middle" fill="#F8FAFC">SQLite</text>
+
+    <!-- Mac Release -->
+    <rect x="224" y="0" width="154" height="40" rx="10" fill="#0F3B36" stroke="#65CDB1" stroke-width="1.5"/>
+    <circle cx="247" cy="20" r="4.5" fill="#65CDB1"/>
+    <text x="310" y="26" text-anchor="middle" fill="#B6F3D9">Mac Release</text>
+  </g>
+
+  <!-- Panel derecho mejorado: Mini app realista (sidebar + prospecto + mapa + métricas) -->
+  <g transform="translate(692, 102)">
+    <!-- Ventana principal -->
+    <rect x="0" y="0" width="496" height="436" rx="16" fill="#F8FAFB" stroke="#356270" stroke-width="2"/>
+
+    <!-- Barra de ventana macOS -->
+    <rect x="0" y="0" width="496" height="38" rx="16" fill="#0F232D"/>
+    <rect x="0" y="20" width="496" height="18" fill="#0F232D"/>
+    <circle cx="22" cy="19" r="5" fill="#F87171"/>
+    <circle cx="38" cy="19" r="5" fill="#FBBF24"/>
+    <circle cx="54" cy="19" r="5" fill="#34D399"/>
+    <text x="248" y="23" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12.5" font-weight="600" fill="#94A3B8">Prospect Intelligence · Desktop</text>
+
+    <!-- Sidebar oscura fiel a la app -->
+    <rect x="0" y="38" width="114" height="398" fill="#132934"/>
+    <rect x="0" y="420" width="114" height="16" rx="16" fill="#132934"/>
+    <rect x="10" y="38" width="104" height="398" fill="#132934"/>
+
+    <!-- Items de sidebar -->
+    <rect x="10" y="54" width="94" height="28" rx="7" fill="#1E4352"/>
+    <circle cx="23" cy="68" r="3.5" fill="#65CDB1"/>
+    <text x="34" y="72" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="12" font-weight="700" fill="#F8FAFC">Hoy</text>
+
+    <text x="22" y="106" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11.5" font-weight="500" fill="#94A3B8">Seguimientos</text>
+    <text x="22" y="134" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11.5" font-weight="500" fill="#94A3B8">Territorios</text>
+    <text x="22" y="162" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11.5" font-weight="500" fill="#94A3B8">Métricas</text>
+    <text x="22" y="190" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11.5" font-weight="500" fill="#94A3B8">CRM</text>
+
+    <!-- Indicador inferior sidebar -->
+    <circle cx="20" cy="410" r="3.5" fill="#34D399"/>
+    <text x="30" y="414" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="10.5" fill="#CBD5E1">INEGI DENUE</text>
+
+    <!-- Área de contenido -->
+    <!-- Encabezado interno -->
+    <text x="132" y="68" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="15" font-weight="700" fill="#0F172A">Lista priorizada</text>
+    <rect x="412" y="52" width="66" height="22" rx="6" fill="#E6F7F1" stroke="#65CDB1" stroke-width="1"/>
+    <text x="445" y="67" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11" font-weight="700" fill="#0F766E">Top Fit</text>
+
+    <!-- Tarjeta prospecto 1 (destacada) -->
+    <rect x="132" y="84" width="346" height="104" rx="11" fill="#FFFFFF" stroke="#65CDB1" stroke-width="1.8"/>
+    <rect x="132" y="84" width="6" height="104" rx="3" fill="#0F766E"/>
+    <text x="150" y="108" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="13.5" font-weight="700" fill="#0F172A">Industrial del Centro</text>
+    <text x="150" y="126" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11" fill="#64748B">Metalmecánica · Sitio web activo</text>
+
+    <!-- Badges de score -->
+    <rect x="404" y="96" width="60" height="38" rx="8" fill="#D1FAE5"/>
+    <text x="434" y="116" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="16" font-weight="700" fill="#065F46">92</text>
+    <text x="434" y="129" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="9.5" font-weight="600" fill="#047857">SCORE</text>
+
+    <!-- Botones de acción CRM -->
+    <rect x="150" y="146" width="108" height="26" rx="6" fill="#0F766E"/>
+    <text x="204" y="163" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11" font-weight="600" fill="#FFFFFF">Abrir borrador</text>
+    <rect x="268" y="146" width="94" height="26" rx="6" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+    <text x="315" y="163" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11" font-weight="600" fill="#334155">Seguimiento</text>
+
+    <!-- Tarjeta prospecto 2 -->
+    <rect x="132" y="200" width="346" height="60" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.4"/>
+    <text x="150" y="224" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="13" font-weight="700" fill="#1E293B">Manufactura Bajío</text>
+    <text x="150" y="243" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11" fill="#64748B">Autopartes · Seguimiento hoy</text>
+    <rect x="416" y="214" width="48" height="30" rx="7" fill="#F1F5F9"/>
+    <text x="440" y="234" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="14" font-weight="700" fill="#0F172A">86</text>
+
+    <!-- Panel inferior dividido: Mini Mapa + Gráfica de Embudo/Scoring -->
+    <!-- Mini Mapa de territorios -->
+    <rect x="132" y="274" width="166" height="144" rx="11" fill="#EAF2F4" stroke="#CBD5E1" stroke-width="1.2"/>
+    <!-- Trazado estilizado de vías/cuadrícula -->
+    <path d="M132 325 L298 308 M132 372 L298 358 M185 274 L174 418 M245 274 L258 418" stroke="#CBD5E1" stroke-width="2" fill="none"/>
+    <path d="M148 398 Q210 340 278 304" stroke="#0F766E" stroke-width="2" stroke-dasharray="4 4" fill="none" opacity="0.6"/>
+    <!-- Pines en el mapa -->
+    <circle cx="176" cy="348" r="14" fill="#65CDB1" fill-opacity="0.3"/>
+    <circle cx="176" cy="348" r="6" fill="#0F766E" stroke="#FFFFFF" stroke-width="2"/>
+    <circle cx="230" cy="316" r="16" fill="#65CDB1" fill-opacity="0.35"/>
+    <circle cx="230" cy="316" r="7" fill="#0F766E" stroke="#FFFFFF" stroke-width="2"/>
+    <circle cx="264" cy="364" r="11" fill="#65CDB1" fill-opacity="0.3"/>
+    <circle cx="264" cy="364" r="5" fill="#147261" stroke="#FFFFFF" stroke-width="1.8"/>
+    <!-- Etiqueta mapa -->
+    <rect x="142" y="284" width="84" height="20" rx="5" fill="#FFFFFF" fill-opacity="0.92"/>
+    <text x="184" y="298" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="10.5" font-weight="700" fill="#0F2933">Mapa DENUE</text>
+
+    <!-- Gráfica de Scoring / Conversión -->
+    <rect x="310" y="274" width="168" height="144" rx="11" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.2"/>
+    <text x="324" y="296" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="11.5" font-weight="700" fill="#0F172A">Scoring &amp; CRM</text>
+    <text x="324" y="311" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="10" fill="#64748B">Prioridad por giro</text>
+
+    <!-- Líneas guía sutiles -->
+    <line x1="324" y1="336" x2="464" y2="336" stroke="#F1F5F9" stroke-width="1"/>
+    <line x1="324" y1="362" x2="464" y2="362" stroke="#F1F5F9" stroke-width="1"/>
+    <line x1="324" y1="388" x2="464" y2="388" stroke="#E2E8F0" stroke-width="1.2"/>
+
+    <!-- Barras del gráfico -->
+    <rect x="334" y="362" width="22" height="26" rx="4" fill="#93E1C5"/>
+    <rect x="366" y="346" width="22" height="42" rx="4" fill="#65CDB1"/>
+    <rect x="398" y="334" width="22" height="54" rx="4" fill="#147261"/>
+    <rect x="430" y="322" width="22" height="66" rx="4" fill="url(#barGrad)"/>
+
+    <!-- Etiquetas eje X -->
+    <text x="345" y="404" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="9.5" font-weight="600" fill="#64748B">Fit</text>
+    <text x="377" y="404" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="9.5" font-weight="600" fill="#64748B">Web</text>
+    <text x="409" y="404" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="9.5" font-weight="600" fill="#64748B">CRM</text>
+    <text x="441" y="404" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, sans-serif" font-size="9.5" font-weight="700" fill="#0F766E">Top</text>
+  </g>
+</svg>

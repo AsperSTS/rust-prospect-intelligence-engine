@@ -216,6 +216,10 @@ where
             ImportMode::Resume | ImportMode::Recheck => p.started && !p.completed,
         })
         .collect::<Vec<_>>();
+    control.update(|s| {
+        s.analyzing = false;
+        s.total = settings.denue_pages;
+    });
     let mut read = 0;
     for (scope, p) in selected {
         let mut start = p.next;
@@ -324,7 +328,9 @@ pub async fn pull_batch(
 ) -> Result<usize> {
     let token = db.paths.secrets()?.denue;
     if token.is_empty() {
-        return Err(invalid("Configura tu token DENUE en Ajustes → Fuentes."));
+        return Err(invalid(
+            "Configura tu token DENUE en Ajustes → Tokens y fuentes.",
+        ));
     }
     let client = crate::sources::GovernmentClient::new()?;
     run_batch(db, settings, profile, mode, control, |scope, start| {

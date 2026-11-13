@@ -64,9 +64,7 @@ impl<T: Clone + 'static> CachedRead<T> {
                 );
             }
         }
-        Some(
-            rsx! {section{class:"panel load-status",role:"status",aria_busy:"true",h2{"Cargando {label}…"}p{class:"muted","Espera un momento."}}},
-        )
+        Some(crate::ui::loading_screen_card(label))
     }
 }
 

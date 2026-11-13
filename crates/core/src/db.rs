@@ -74,6 +74,7 @@ impl Db {
                     .map_err(Error::from)
                     .and_then(|mut c| {
                         initialize(&mut c, &worker_paths)?;
+                        messages::Templates::ensure_file(&worker_paths.home)?;
                         Ok(c)
                     });
                 match result {
@@ -118,6 +119,13 @@ impl Db {
             .await
             .map_err(|_| Error::WorkerClosed)?;
         rx.await.map_err(|_| Error::WorkerClosed)?
+    }
+    pub(crate) fn clear_cache(&self) {
+        self.cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entries
+            .clear();
     }
     pub(crate) async fn memoized<T: Clone + Send + Sync + 'static>(
         &self,
@@ -183,8 +191,12 @@ impl Db {
         self.call(|c| Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?))
             .await
     }
-    pub async fn summary(&self) -> Result<Summary> {
-        self.memoized("summary".into(), summary).await
+    /// Counters for one offer. `today` counts exactly the rows the Hoy view lists.
+    pub async fn summary(&self, profile: Profile) -> Result<Summary> {
+        self.memoized(format!("summary:{}", profile.id()), move |c| {
+            summary(c, profile)
+        })
+        .await
     }
     pub async fn refresh_priorities(&self) -> Result<usize> {
         self.call(|c| {
@@ -199,7 +211,14 @@ impl Db {
         self.dimensions_for(String::new()).await
     }
     pub async fn dimensions_for(&self, entity: String) -> Result<(Vec<String>, Vec<String>)> {
-        self.memoized(format!("dimensions:{entity}"), move|c|{let get=|column:&str|->Result<Vec<String>>{let mut st=c.prepare(&format!("SELECT DISTINCT {column} FROM prospectos WHERE (?='' OR entidad=?) AND COALESCE({column},'')<>'' ORDER BY {column}"))?;Ok(st.query_map(params![entity,entity],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?)};Ok((get("giro")?,get("municipio")?))}).await
+        self.memoized(format!("dimensions:{entity}"), move|c|{let get=|column:&str|->Result<Vec<String>>{let mut st=c.prepare(&format!("SELECT DISTINCT {column} FROM prospectos WHERE (?='' OR entidad=?) AND COALESCE({column},'')<>'' ORDER BY {column}"))?;Ok(st.query_map(params![entity,entity],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?)};let mut giros=get("giro")?;
+            // Each offer may classify the same business under its own giro.
+            let mut st=c.prepare("SELECT DISTINCT json_extract(s.analysis_json,'$.giro') FROM profile_scores s JOIN prospectos p ON p.id=s.prospect_id WHERE (?='' OR p.entidad=?)")?;
+            for giro in st.query_map(params![entity,entity],|r|r.get::<_,Option<String>>(0))?{
+                if let Some(giro)=giro? && !giro.is_empty() && !giros.contains(&giro){giros.push(giro);}
+            }
+            giros.sort();
+            Ok((giros,get("municipio")?))}).await
     }
     pub async fn analyze(
         &self,
@@ -207,7 +226,16 @@ impl Db {
         control: crate::jobs::JobControl,
     ) -> Result<usize> {
         let paths = self.paths.clone();
-        self.call(move |c| analyze_all(c, &paths, &settings, &control, config::today()))
+        self.call(move |c| analyze_all(c, &paths, &settings, &control, config::today(), false))
+            .await
+    }
+    pub async fn analyze_pending(
+        &self,
+        settings: Settings,
+        control: crate::jobs::JobControl,
+    ) -> Result<usize> {
+        let paths = self.paths.clone();
+        self.call(move |c| analyze_all(c, &paths, &settings, &control, config::today(), true))
             .await
     }
     pub async fn mutate(&self, m: Mutation, settings: Settings) -> Result<String> {
@@ -554,7 +582,7 @@ pub fn table_counts(c: &Connection) -> Result<BTreeMap<String, usize>> {
 }
 pub fn row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
     let mut values = serde_json::Map::new();
-    for (i, key) in row.as_ref().column_names().iter().enumerate() {
+    for (i, key) in row.as_ref().column_names().enumerate() {
         let v = match row.get_ref(i)? {
             ValueRef::Null => serde_json::Value::Null,
             ValueRef::Integer(n) => n.into(),
@@ -563,12 +591,12 @@ pub fn row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> 
             ValueRef::Blob(_) => {
                 return Err(rusqlite::Error::InvalidColumnType(
                     i,
-                    (*key).into(),
+                    key.into(),
                     rusqlite::types::Type::Blob,
                 ));
             }
         };
-        values.insert((*key).into(), v);
+        values.insert(key.into(), v);
     }
     Ok(values.into())
 }
@@ -595,6 +623,7 @@ fn decode_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<Prospect> {
         p.hypothesis_basis = a.hypothesis_basis;
         p.hypothesis_confidence = a.hypothesis_confidence;
         p.canal = a.action.action;
+        p.giro = a.giro;
         p.giro_display = a.giro_display;
     }
     Ok(p)
@@ -625,7 +654,10 @@ fn predicates(q: &Query) -> (String, Vec<Value>) {
     }
     for (col, value) in [
         ("p.estado", &q.state),
-        ("p.giro", &q.giro),
+        (
+            "COALESCE(json_extract(s.analysis_json,'$.giro'),p.giro)",
+            &q.giro,
+        ),
         ("p.municipio", &q.municipio),
         ("p.entidad", &q.entidad),
     ] {
@@ -699,7 +731,22 @@ pub fn all(c: &Connection) -> Result<Vec<Prospect>> {
         .query_map([], decode)?
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
-fn summary(c: &mut Connection) -> Result<Summary> {
+fn summary(c: &mut Connection, profile: Profile) -> Result<Summary> {
+    contact_functions(c)?;
+    let hoy = Query {
+        view: View::Today,
+        contactable: true,
+        profile,
+        ..Default::default()
+    };
+    let (where_sql, args) = predicates(&hoy);
+    let mut today_args = vec![Value::Text(profile.id().into())];
+    today_args.extend(args);
+    let today_count: usize = c.query_row(
+        &format!("SELECT COUNT(*) FROM prospectos p LEFT JOIN profile_scores s ON s.prospect_id=p.id AND s.profile_id=? WHERE {where_sql}"),
+        rusqlite::params_from_iter(&today_args),
+        |r| r.get::<_, i64>(0).map(|n| n as usize),
+    )?;
     let count = |predicate: &str| -> Result<usize> {
         Ok(c.query_row(
             &format!("SELECT COUNT(*) FROM prospectos WHERE {predicate}"),
@@ -707,13 +754,10 @@ fn summary(c: &mut Connection) -> Result<Summary> {
             |r| r.get::<_, i64>(0).map(|n| n as usize),
         )?)
     };
-    contact_functions(c)?;
     let today = config::today().to_string();
     let mut out = Summary {
         total: count("1=1")?,
-        today: count(&format!(
-            "estado IN ('nuevo','revisado') AND priority_score>0 AND COALESCE(snooze_until,'')<='{today}'"
-        ))?,
+        today: today_count,
         due: count(&format!(
             "estado='contactado' AND proximo_seguimiento<='{today}'"
         ))?,
@@ -760,7 +804,7 @@ pub(crate) fn upsert_with_changes(
         .join(" OR ");
     let insert_cols = [vec!["id".to_owned()], columns.clone()].concat();
     let sql = format!(
-        "INSERT INTO prospectos({}) VALUES ({}) ON CONFLICT(id) DO UPDATE SET {updates} WHERE {changed}",
+        "INSERT INTO prospectos({}) VALUES ({}) ON CONFLICT(id) DO UPDATE SET {updates},analizado_en=NULL WHERE {changed}",
         insert_cols.join(","),
         vec!["?"; insert_cols.len()].join(",")
     );
@@ -865,6 +909,7 @@ fn analyze_all(
     settings: &Settings,
     control: &crate::jobs::JobControl,
     today: NaiveDate,
+    only_new: bool,
 ) -> Result<usize> {
     let rows = all(c)?;
     let groups = groups::group(&rows);
@@ -873,9 +918,39 @@ fn analyze_all(
         .filter(|p| p.etapa_max >= 1 && groups[&p.id].possible_chain != 0)
         .map(|p| groups[&p.id].group_key.clone())
         .collect::<HashSet<_>>();
+    let already_scored = if only_new {
+        let mut st = c.prepare("SELECT prospect_id FROM profile_scores WHERE profile_id IN ('automatizacion','web_marketing') GROUP BY prospect_id HAVING COUNT(*)=2")?;
+        st.query_map([], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<HashSet<_>, _>>()?
+    } else {
+        HashSet::new()
+    };
+    let targets = rows
+        .iter()
+        .filter(|p| {
+            let group = &groups[&p.id];
+            !only_new
+                || p.analizado_en.trim().is_empty()
+                || !already_scored.contains(&p.id)
+                || p.group_key != group.group_key
+                || p.possible_chain != group.possible_chain
+                || p.possible_chain_count != group.possible_chain_count
+        })
+        .collect::<Vec<_>>();
+    let total_targets = targets.len();
+    control.update(|s| {
+        s.analyzing = true;
+        s.processed = 0;
+        s.total = total_targets;
+        s.message = if total_targets == 0 {
+            "Sin registros nuevos por calcular".into()
+        } else {
+            format!("Calculando prioridades (0 de {total_targets})…")
+        };
+    });
     let templates = messages::Templates::load(&paths.home)?;
     let tx = c.transaction()?;
-    for (i, p) in rows.iter().enumerate() {
+    for (i, p) in targets.iter().enumerate() {
         control.check()?;
         let signals = signals(&tx, &p.id)?;
         for profile in [Profile::Automatizacion, Profile::WebMarketing] {
@@ -887,7 +962,7 @@ fn analyze_all(
                 today,
                 profile,
             );
-            let mut rendered = p.clone();
+            let mut rendered = (*p).clone();
             rendered.giro = analysis.giro.clone();
             rendered.giro_display = analysis.giro_display.clone();
             let message = messages::first(
@@ -895,16 +970,19 @@ fn analyze_all(
             )?;
             save_analysis(&tx, p, &analysis, profile, &message)?;
         }
-        if i % 100 == 0 {
+        if i % 25 == 0 {
             control.update(|s| {
                 s.processed = i + 1;
-                s.message = format!("Analizando {} de {}", i + 1, rows.len());
+                s.message = format!("Calculando prioridades ({} de {total_targets})", i + 1);
             });
         }
     }
     tx.commit()?;
-    control.update(|s| s.processed = rows.len());
-    Ok(rows.len())
+    control.update(|s| {
+        s.processed = total_targets;
+        s.message = format!("Prioridades calculadas: {total_targets} establecimientos");
+    });
+    Ok(total_targets)
 }
 fn mutate(
     c: &mut Connection,
@@ -1118,9 +1196,14 @@ fn mutate(
                 outcome = state.clone();
             }
             Command::Note { .. } => {
+                let Some(notes) = m.notes.as_deref() else {
+                    return Err(invalid(
+                        "La nota no trae texto; las notas guardadas se conservan",
+                    ));
+                };
                 tx.execute(
                     "UPDATE prospectos SET notas=? WHERE id=?",
-                    params![m.notes.as_deref().unwrap_or(""), pid],
+                    params![notes, pid],
                 )?;
                 interaction(&tx, "nota", None, None, None, None, None)?;
             }
@@ -1186,6 +1269,7 @@ fn refresh_scores(c: &Connection, target: Option<&str>, today: NaiveDate) -> Res
                 .optional()?;
             if let Some(raw) = cached {
                 let mut a: Analysis = serde_json::from_str(&raw)?;
+                let fit_changed = rules::refresh_fit(profile, &p, &mut a);
                 let mut row = p.clone();
                 row.giro = a.giro.clone();
                 row.giro_display = a.giro_display.clone();
@@ -1197,14 +1281,17 @@ fn refresh_scores(c: &Connection, target: Option<&str>, today: NaiveDate) -> Res
                     today,
                 );
                 let action = rules::next_action(&row, a.fit_score, !types.is_empty(), today);
-                if score != a.priority_score || items != a.priority_breakdown || action != a.action
+                if fit_changed
+                    || score != a.priority_score
+                    || items != a.priority_breakdown
+                    || action != a.action
                 {
                     a.priority_score = score;
                     a.priority_breakdown = items;
                     a.action = action;
-                    c.execute("UPDATE profile_scores SET priority_score=?,analysis_json=?,updated_at=? WHERE prospect_id=? AND profile_id=?",params![score,serde_json::to_string(&a)?,config::now(),p.id,profile.id()])?;
+                    c.execute("UPDATE profile_scores SET fit_score=?,priority_score=?,analysis_json=?,updated_at=? WHERE prospect_id=? AND profile_id=?",params![a.fit_score,score,serde_json::to_string(&a)?,config::now(),p.id,profile.id()])?;
                     if profile == Profile::Automatizacion {
-                        c.execute("UPDATE prospectos SET priority_score=?,priority_breakdown=?,score=?,canal=? WHERE id=?",params![score,serde_json::to_string(&a.priority_breakdown)?,score,a.action.action,p.id])?;
+                        c.execute("UPDATE prospectos SET fit_score=?,fit_breakdown=?,priority_score=?,priority_breakdown=?,score=?,canal=? WHERE id=?",params![a.fit_score,serde_json::to_string(&a.fit_breakdown)?,score,serde_json::to_string(&a.priority_breakdown)?,score,a.action.action,p.id])?;
                     }
                     updated += 1;
                 }
@@ -1378,5 +1465,290 @@ mod read_cache_tests {
         cache.date = "yesterday".into();
         cache.observe(&c).unwrap();
         assert!(cache.entries.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod analysis_tests {
+    use super::*;
+    use crate::jobs::JobControl;
+
+    #[tokio::test]
+    async fn analyze_pending_scores_only_new_records_while_analyze_recalculates_all() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let db = Db::open(AppPaths::at(temp.path()).unwrap()).unwrap();
+        let settings = Settings::default();
+        let sample = |id: &str| Prospect {
+            id: id.into(),
+            nombre: format!("Empresa {id}"),
+            clase_id: "336310".into(),
+            clase_actividad: "Fabricación de autopartes".into(),
+            giro: "Autopartes".into(),
+            giro_display: "autopartes".into(),
+            estrato: "31 a 50 personas".into(),
+            tipo_establecimiento: "fijo".into(),
+            telefono: format!("222123456{}", &id[1..]),
+            correo: format!("ventas@empresa{id}.mx"),
+            estado: "nuevo".into(),
+            ..Default::default()
+        };
+
+        db.import_records(vec![sample("p1")]).await.unwrap();
+        assert_eq!(
+            db.analyze(settings.clone(), JobControl::new("test"))
+                .await
+                .unwrap(),
+            1
+        );
+
+        db.import_records(vec![sample("p2")]).await.unwrap();
+        assert_eq!(
+            db.analyze_pending(settings.clone(), JobControl::new("test"))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.analyze_pending(settings.clone(), JobControl::new("test"))
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.analyze(settings, JobControl::new("test")).await.unwrap(),
+            2
+        );
+    }
+
+    fn command(id: &str, profile: Profile, command: Command, notes: Option<&str>) -> Mutation {
+        Mutation {
+            operation_id: crate::operation_id(),
+            prospect_id: id.into(),
+            profile,
+            command,
+            notes: notes.map(Into::into),
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_analysis_covers_changed_records_and_older_members_of_a_new_chain() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let db = Db::open(AppPaths::at(temp.path()).unwrap()).unwrap();
+        let settings = Settings::default();
+        let branch = |id: &str, correo: &str| Prospect {
+            id: id.into(),
+            nombre: "Acero Alfa".into(),
+            razon_social: "Acero Alfa SA de CV".into(),
+            clase_id: "336310".into(),
+            clase_actividad: "Fabricación de autopartes".into(),
+            estrato: "31 a 50 personas".into(),
+            tipo_establecimiento: "fijo".into(),
+            telefono: "2221234567".into(),
+            correo: correo.into(),
+            estado: "nuevo".into(),
+            ..Default::default()
+        };
+        db.import_records(vec![branch("p1", "")]).await.unwrap();
+        db.analyze(settings.clone(), JobControl::new("test"))
+            .await
+            .unwrap();
+        let before = db.get("p1".into(), Profile::Automatizacion).await.unwrap();
+        assert_eq!(before.possible_chain, 0);
+
+        // DENUE now brings an email for p1 and a second branch.
+        db.import_records(vec![
+            branch("p1", "ventas@aceroalfa.mx"),
+            branch("p2", "ventas@aceroalfa.mx"),
+        ])
+        .await
+        .unwrap();
+        let pending = db
+            .analyze_pending(settings.clone(), JobControl::new("test"))
+            .await
+            .unwrap();
+        assert_eq!(pending, 2, "the changed record and the new branch");
+        let partial = [
+            db.get("p1".into(), Profile::Automatizacion).await.unwrap(),
+            db.get("p2".into(), Profile::Automatizacion).await.unwrap(),
+            db.get("p1".into(), Profile::WebMarketing).await.unwrap(),
+        ];
+        assert_eq!(partial[0].possible_chain, 1);
+        assert_eq!(partial[0].possible_chain_count, 2);
+        assert_eq!(
+            db.analyze_pending(settings.clone(), JobControl::new("test"))
+                .await
+                .unwrap(),
+            0
+        );
+        db.analyze(settings.clone(), JobControl::new("test"))
+            .await
+            .unwrap();
+        for (i, (id, profile)) in [
+            ("p1", Profile::Automatizacion),
+            ("p2", Profile::Automatizacion),
+            ("p1", Profile::WebMarketing),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let full = db.get(id.into(), profile).await.unwrap();
+            assert_eq!(partial[i].fit_score, full.fit_score, "{id}");
+            assert_eq!(partial[i].priority_score, full.priority_score, "{id}");
+            assert_eq!(partial[i].canal, full.canal, "{id}");
+        }
+
+        // Contacting the older branch now lowers the priority of the rest of its group.
+        let p2_before = db.get("p2".into(), Profile::Automatizacion).await.unwrap();
+        db.mutate(
+            command(
+                "p1",
+                Profile::Automatizacion,
+                Command::Contact {
+                    channel: "telefono".into(),
+                    variant: "A".into(),
+                    message: String::new(),
+                    subject: String::new(),
+                },
+                None,
+            ),
+            settings,
+        )
+        .await
+        .unwrap();
+        let p2_after = db.get("p2".into(), Profile::Automatizacion).await.unwrap();
+        assert!(p2_after.priority_score < p2_before.priority_score);
+        assert!(p2_after.priority_breakdown.contains("grupo ya contactado"));
+    }
+
+    #[tokio::test]
+    async fn web_offer_keeps_its_own_giro_fit_and_today_count_in_step_with_the_crm() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let db = Db::open(AppPaths::at(temp.path()).unwrap()).unwrap();
+        let settings = Settings::default();
+        let dental = Prospect {
+            id: "d1".into(),
+            nombre: "Consultorio Dental Sonrisa".into(),
+            clase_id: "621211".into(),
+            clase_actividad: "Consultorios dentales del sector privado".into(),
+            estrato: "6 a 10 personas".into(),
+            tipo_establecimiento: "fijo".into(),
+            telefono: "2227778899".into(),
+            estado: "nuevo".into(),
+            ..Default::default()
+        };
+        let unreachable = Prospect {
+            id: "f1".into(),
+            nombre: "Fábrica Sin Contacto".into(),
+            clase_id: "336310".into(),
+            clase_actividad: "Fabricación de autopartes".into(),
+            estrato: "51 a 100 personas".into(),
+            tipo_establecimiento: "fijo".into(),
+            estado: "nuevo".into(),
+            ..Default::default()
+        };
+        db.import_records(vec![dental, unreachable]).await.unwrap();
+        db.analyze(settings.clone(), JobControl::new("test"))
+            .await
+            .unwrap();
+
+        // The Hoy badge counts exactly the rows its view lists, per offer.
+        for profile in [Profile::Automatizacion, Profile::WebMarketing] {
+            let listed = db
+                .page(Query {
+                    view: View::Today,
+                    contactable: true,
+                    profile,
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+                .total;
+            assert_eq!(db.summary(profile).await.unwrap().today, listed);
+        }
+
+        let web = db.get("d1".into(), Profile::WebMarketing).await.unwrap();
+        let auto = db.get("d1".into(), Profile::Automatizacion).await.unwrap();
+        assert_eq!(web.giro, "Comercio y servicios");
+        assert_ne!(auto.giro, web.giro);
+        let by_giro = db
+            .page(Query {
+                giro: "Comercio y servicios".into(),
+                profile: Profile::WebMarketing,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(by_giro.total, 1);
+        assert!(
+            db.dimensions()
+                .await
+                .unwrap()
+                .0
+                .contains(&"Comercio y servicios".to_owned())
+        );
+
+        // Reviewing the record moves the web fit at once, like a full recalculation would.
+        db.mutate(
+            command("d1", Profile::WebMarketing, Command::Research {}, None),
+            settings.clone(),
+        )
+        .await
+        .unwrap();
+        let reviewed = db.get("d1".into(), Profile::WebMarketing).await.unwrap();
+        assert_eq!(reviewed.fit_score, web.fit_score + 10);
+        db.analyze(settings.clone(), JobControl::new("test"))
+            .await
+            .unwrap();
+        let full = db.get("d1".into(), Profile::WebMarketing).await.unwrap();
+        assert_eq!(reviewed.fit_score, full.fit_score);
+        assert_eq!(reviewed.priority_score, full.priority_score);
+        assert_eq!(reviewed.fit_breakdown, full.fit_breakdown);
+
+        // A note command without text is rejected and keeps what was written.
+        db.mutate(
+            command(
+                "d1",
+                Profile::WebMarketing,
+                Command::Note {},
+                Some("Contacto clave: Ing. Pérez"),
+            ),
+            settings.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            db.mutate(
+                command("d1", Profile::WebMarketing, Command::Note {}, None),
+                settings.clone()
+            )
+            .await
+            .is_err()
+        );
+        let kept = db.get("d1".into(), Profile::WebMarketing).await.unwrap();
+        assert_eq!(kept.notas, "Contacto clave: Ing. Pérez");
+
+        // Metrics by giro use the offer's own classification once there is a contact.
+        db.mutate(
+            command(
+                "d1",
+                Profile::WebMarketing,
+                Command::Contact {
+                    channel: "telefono".into(),
+                    variant: "A".into(),
+                    message: String::new(),
+                    subject: String::new(),
+                },
+                None,
+            ),
+            Settings::default(),
+        )
+        .await
+        .unwrap();
+        let cuts = db
+            .metrics(Profile::WebMarketing, "giro".into())
+            .await
+            .unwrap()
+            .cuts;
+        assert!(cuts.iter().any(|cut| cut.label == "Comercio y servicios"));
     }
 }

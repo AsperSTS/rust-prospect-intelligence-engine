@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 pub mod analytics;
+pub mod archive;
 pub mod config;
 pub mod contacts;
 pub mod db;

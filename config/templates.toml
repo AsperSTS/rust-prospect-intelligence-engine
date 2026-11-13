@@ -99,7 +99,7 @@ Saludos,
 WhatsApp: {whatsapp}"""
 cuerpo_con_04 = """Buen día,
 
-Soy {owner}. Trabajé en Audi México en proyectos de digitalización y automatización. Actualmente desarrollo soluciones para operación interna.
+Soy {owner}. {credencial} Actualmente desarrollo soluciones para operación interna.
 
 Me encontré con {nombre} y quería entender algo sobre {cosa}:
 

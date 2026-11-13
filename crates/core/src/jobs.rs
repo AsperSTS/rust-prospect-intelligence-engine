@@ -13,6 +13,8 @@ pub struct JobState {
     pub kind: String,
     pub status: String,
     pub processed: usize,
+    pub total: usize,
+    pub analyzing: bool,
     pub inserted: usize,
     pub updated: usize,
     pub invalid: usize,

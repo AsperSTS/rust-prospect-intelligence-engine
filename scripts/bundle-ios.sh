@@ -7,13 +7,17 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 1
 fi
 
+. ./scripts/_embedded_tokens.sh
+
 TARGET="aarch64-apple-ios-sim"
 RUN_SIM=0
 PROFILE="debug"
 CARGO_FLAG=""
+EMBEDDED_TOKENS=0
+TOKENS_FILE=""
 
-for arg in "$@"; do
-    case "$arg" in
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         --device)
             TARGET="aarch64-apple-ios"
             ;;
@@ -27,12 +31,32 @@ for arg in "$@"; do
         --run)
             RUN_SIM=1
             ;;
+        --embedded-tokens)
+            EMBEDDED_TOKENS=1
+            ;;
+        --tokens-file)
+            shift
+            [ "$#" -gt 0 ] || { printf '%s\n' 'Falta la ruta para --tokens-file.' >&2; exit 1; }
+            TOKENS_FILE=$1
+            ;;
+        --tokens-file=*)
+            TOKENS_FILE=${1#--tokens-file=}
+            ;;
         *)
-            printf 'Argumento desconocido: %s\n' "$arg" >&2
+            printf 'Argumento desconocido: %s\n' "$1" >&2
             exit 1
             ;;
     esac
+    shift
 done
+
+FEATURE_FLAG=""
+if [ "$EMBEDDED_TOKENS" -eq 1 ]; then
+    load_embedded_tokens "$TOKENS_FILE"
+    FEATURE_FLAG="--features embedded-tokens"
+else
+    clear_token_env
+fi
 
 if [ "$RUN_SIM" -eq 1 ] && [ "$TARGET" = "aarch64-apple-ios" ]; then
     printf '%s\n' '--run sólo funciona con --simulator. Un iPhone físico requiere firma de desarrollo.' >&2
@@ -50,7 +74,7 @@ case "$app_version" in ''|*[!0-9.]*) printf '%s\n' 'Versión de workspace invál
 
 printf 'Compilando prospect-mobile para target %s (%s)...\n' "$TARGET" "$PROFILE"
 # shellcheck disable=SC2086
-cargo build --locked --target "$TARGET" -p prospect-mobile $CARGO_FLAG
+cargo build --locked --target "$TARGET" -p prospect-mobile $CARGO_FLAG $FEATURE_FLAG
 
 out_dir="dist/ios"
 mkdir -p "$out_dir"

@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
+mod app_shell;
 #[cfg(target_os = "ios")]
 mod ios;
-mod app_shell;
-mod simple_ui;
+mod onboarding;
 mod ui;
 mod view_cache;
 
-use prospect_core::{Db, Settings};
 pub use app_shell::App;
+use prospect_core::{Db, Settings};
 pub use ui::{StartupFailure, StartupProblem};
 
 #[derive(Clone, Copy, Default, PartialEq)]

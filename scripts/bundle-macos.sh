@@ -5,9 +5,52 @@ if [ "$(uname -s)" != "Darwin" ]; then
     printf '%s\n' 'Este empaquetador necesita macOS.' >&2
     exit 1
 fi
+
+. ./scripts/_embedded_tokens.sh
+
+EMBEDDED_TOKENS=0
+TOKENS_FILE=""
+OFFLINE_FLAG="--offline"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --embedded-tokens)
+            EMBEDDED_TOKENS=1
+            ;;
+        --tokens-file)
+            shift
+            [ "$#" -gt 0 ] || { printf '%s\n' 'Falta la ruta para --tokens-file.' >&2; exit 1; }
+            TOKENS_FILE=$1
+            ;;
+        --tokens-file=*)
+            TOKENS_FILE=${1#--tokens-file=}
+            ;;
+        --online)
+            OFFLINE_FLAG=""
+            ;;
+        *)
+            printf 'Argumento desconocido: %s\n' "$1" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-12.0}"
+
+FEATURE_FLAG=""
+if [ "$EMBEDDED_TOKENS" -eq 1 ]; then
+    load_embedded_tokens "$TOKENS_FILE"
+    FEATURE_FLAG="--features embedded-tokens"
+else
+    clear_token_env
+fi
+
 ./scripts/generate-icons.sh
-cargo build --release --locked --offline --workspace
-build_root=$(cargo metadata --offline --locked --format-version 1 --no-deps | /usr/bin/plutil -extract target_directory raw -o - -)
+# shellcheck disable=SC2086
+cargo build --release --locked $OFFLINE_FLAG $FEATURE_FLAG --workspace
+# shellcheck disable=SC2086
+build_root=$(cargo metadata $OFFLINE_FLAG --locked --format-version 1 --no-deps | /usr/bin/plutil -extract target_directory raw -o - -)
 app_version=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml)
 case "$app_version" in ''|*[!0-9.]*) printf '%s\n' 'Versión de workspace inválida.' >&2; exit 1;; esac
 mkdir -p dist

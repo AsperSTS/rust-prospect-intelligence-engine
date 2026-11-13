@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+embedded-tokens = ["prospect-core/embedded-tokens"]
+
 [dependencies]
 prospect-core = { version = "=0.2.1", path = "../core" }
 dioxus = { version = "=0.7.10", default-features = false, features = ["minimal", "mobile", "document"] }

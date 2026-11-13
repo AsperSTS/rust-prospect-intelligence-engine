@@ -2,7 +2,7 @@ use crate::{Layout, Services, ui};
 use dioxus::prelude::*;
 use prospect_core::{
     Command, Db, Interaction, Message, Mutation, Page, Profile, Prospect, Query, QueryOrder,
-    Settings, Summary, View,
+    Settings, View,
 };
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -167,12 +167,13 @@ fn SimpleDesktopApp() -> Element {
     let services = consume_context::<Services>();
     let db = services.db.clone();
     let settings = services.settings.clone();
+    let onboarding = try_use_context::<crate::onboarding::OnboardingControl>();
     let profile = Profile::parse(&settings.profile).unwrap_or_default();
     let mut screen = use_signal(WorkScreen::default);
     let mut selected = use_signal(String::new);
     let mut revision = use_signal(|| 0u64);
     let mut toast = use_signal(String::new);
-    let mut busy = use_signal(|| false);
+    let busy = use_signal(|| false);
     let mut advanced = use_signal(|| false);
     let mut notification_hidden = use_signal(|| false);
 
@@ -180,7 +181,16 @@ fn SimpleDesktopApp() -> Element {
         return rsx! {
             style { {include_str!("simple_ui.css")} }
             div { class:"simple-advanced-return",
-                button { onclick:move |_|advanced.set(false), "← Volver al flujo simple" }
+                button {
+                    onclick:move |_| {
+                        if let Some(mut o) = onboarding {
+                            o.initial_screen.set(None);
+                        }
+                        revision += 1;
+                        advanced.set(false);
+                    },
+                    "← Volver al flujo simple"
+                }
             }
             ui::App {}
         };
@@ -261,12 +271,18 @@ fn SimpleDesktopApp() -> Element {
         }
     });
 
-    let totals = summary
+    let summary_loaded = summary
         .read()
         .as_ref()
         .and_then(|r| r.as_ref().ok())
-        .cloned()
-        .unwrap_or_default();
+        .cloned();
+    let totals = summary_loaded.clone().unwrap_or_default();
+    let _ = onboarding.map(|o| *o.revision.read());
+    let denue_configured = !db
+        .paths
+        .secrets()
+        .map(|s| s.denue.trim().is_empty())
+        .unwrap_or(true);
     let due_page = due
         .read()
         .as_ref()
@@ -314,6 +330,53 @@ fn SimpleDesktopApp() -> Element {
                     div { class:"simple-day-summary",
                         span { strong { "{totals.contacted_today}" } " contactos hoy" }
                         span { strong { "{totals.followed_today}" } " seguimientos hoy" }
+                    }
+                }
+                if summary_loaded.as_ref().is_some_and(|s| s.total == 0) {
+                    div { class:"simple-notification", role:"status",
+                        div {
+                            if !denue_configured {
+                                strong { "Configura tu token DENUE para comenzar" }
+                                p { "La aplicación no incluye credenciales ni bases precargadas. Configura tus tokens gratuitos de INEGI (DENUE / Indicadores) y Banxico SIE con enlaces directos a los portales oficiales." }
+                            } else {
+                                strong { "Tu base local está vacía" }
+                                p { "Tus credenciales están listas. Abre Actualizaciones para importar tu primer lote de establecimientos." }
+                            }
+                            div { class:"simple-action-row",
+                                if !denue_configured {
+                                    button {
+                                        class:"primary",
+                                        onclick:move |_| {
+                                            if let Some(mut o) = onboarding {
+                                                o.open.set(true);
+                                            }
+                                        },
+                                        "Configurar tokens"
+                                    }
+                                    button {
+                                        class:"secondary",
+                                        onclick:move |_| {
+                                            if let Some(mut o) = onboarding {
+                                                o.initial_screen.set(Some(ui::Screen::Settings));
+                                            }
+                                            advanced.set(true);
+                                        },
+                                        "Abrir Ajustes"
+                                    }
+                                } else {
+                                    button {
+                                        class:"primary",
+                                        onclick:move |_| {
+                                            if let Some(mut o) = onboarding {
+                                                o.initial_screen.set(Some(ui::Screen::Updates));
+                                            }
+                                            advanced.set(true);
+                                        },
+                                        "Ir a descargar datos"
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if totals.due > 0 && !*notification_hidden.read() {
@@ -440,13 +503,22 @@ fn SimpleProspectDetail(
         let db = detail_db.clone();
         let settings = detail_settings.clone();
         async move {
-            let p = db.get(id.clone(), profile).await.map_err(|e| e.to_string())?;
+            let p = db
+                .get(id.clone(), profile)
+                .await
+                .map_err(|e| e.to_string())?;
             let history = db.history(id.clone()).await.map_err(|e| e.to_string())?;
             let signals = db.signals(id).await.map_err(|e| e.to_string())?;
             let templates = prospect_core::messages::Templates::load(&db.paths.home)
                 .map_err(|e| e.to_string())?;
             let message = if p.estado == "contactado" {
-                prospect_core::messages::followup(&p, p.toques.max(1), &settings, &templates, profile)
+                prospect_core::messages::followup(
+                    &p,
+                    p.toques.max(1),
+                    &settings,
+                    &templates,
+                    profile,
+                )
             } else if ["nuevo", "revisado"].contains(&p.estado.as_str()) {
                 prospect_core::messages::first(
                     &p,
@@ -458,9 +530,19 @@ fn SimpleProspectDetail(
                 )
                 .map_err(|e| e.to_string())?
             } else {
-                Message { canal:"manual".into(), variante:"MANUAL".into(), cuerpo:String::new(), asunto:String::new(), problemas:vec![] }
+                Message {
+                    canal: "manual".into(),
+                    variante: "MANUAL".into(),
+                    cuerpo: String::new(),
+                    asunto: String::new(),
+                    problemas: vec![],
+                }
             };
-            Ok::<_, String>(DetailData { prospect:p, history, message })
+            Ok::<_, String>(DetailData {
+                prospect: p,
+                history,
+                message,
+            })
         }
     });
 

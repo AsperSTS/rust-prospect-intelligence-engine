@@ -1,5 +1,8 @@
 [graph]
-targets = [{ triple = "aarch64-apple-darwin" }]
+targets = [
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-pc-windows-msvc" },
+]
 
 [licenses]
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unlicense", "CC0-1.0", "BSL-1.0", "Unicode-3.0", "MPL-2.0"]
@@ -31,7 +34,7 @@ allow-build-scripts = [
   { name = "icu_properties_data", version = "=2.3.0" },
   { name = "libc", version = "=0.2.190" },
   { name = "libm", version = "=0.2.16" },
-  { name = "libsqlite3-sys", version = "=0.38.2" },
+  { name = "libsqlite3-sys", version = "=0.39.1" },
   { name = "native-tls", version = "=0.2.18" },
   { name = "num-traits", version = "=0.2.19" },
   { name = "objc2", version = "=0.6.4" },
@@ -61,6 +64,9 @@ allow-build-scripts = [
   { name = "wasm-bindgen", version = "=0.2.129" },
   { name = "wasm-bindgen-shared", version = "=0.2.129" },
   { name = "web_atoms", version = "=0.2.6" },
+  { name = "webview2-com-sys", version = "=0.38.2" },
+  { name = "windows_x86_64_msvc", version = "=0.52.6" },
+  { name = "windows_x86_64_msvc", version = "=0.53.1" },
   { name = "wry", version = "=0.53.5" },
   { name = "zerocopy", version = "=0.8.59" },
   { name = "zmij", version = "=1.0.23" },
@@ -68,6 +74,16 @@ allow-build-scripts = [
 executables = "deny"
 interpreted = "allow"
 enable-builtin-globs = false
+
+[[bans.build.bypass]]
+name = "webview2-com-sys"
+version = "=0.38.2"
+build-script = "ea73d2566f434a25e8172d0fb9eaad5fa29ee687a8f05b9c2be02b19e4366e16"
+allow = [
+  { path = "arm64/WebView2Loader.dll", checksum = "df5816669f5123595c475d97929240d7d0e04f0bdc7dbe18af1dda42348b73a6" },
+  { path = "x64/WebView2Loader.dll", checksum = "8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c" },
+  { path = "x86/WebView2Loader.dll", checksum = "44ab92c2246ebfb5f98aa5726626fb44beb61543f2ef1803338af9fd295e63f0" },
+]
 
 [sources]
 unknown-registry = "deny"

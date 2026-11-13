@@ -43,37 +43,61 @@ impl AppPaths {
         Ok(paths)
     }
     pub fn secrets(&self) -> Result<Secrets> {
+        // TODO: Migrar el almacenamiento local de credentials.env (0600) a Apple Keychain en macOS e iOS.
         let path = self.home.join("credentials.env");
         let contents = if path.exists() {
             std::fs::read_to_string(path)?
         } else {
             String::new()
         };
+        Ok(Secrets::parse(&contents))
+    }
+}
+impl Secrets {
+    /// Parse `credentials.env` text. Unknown keys are ignored.
+    pub fn parse(contents: &str) -> Self {
         let mut values = BTreeMap::new();
         for line in contents.lines() {
-            if let Some((k, v)) = line.split_once('=') {
-                values.insert(
-                    k.trim().to_owned(),
-                    v.trim().trim_matches(['\'', '"']).to_owned(),
-                );
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if let Some((k, v)) = trimmed.split_once('=') {
+                let key = k.trim();
+                let value = v.trim().trim_matches(['\'', '"']).trim();
+                if !key.is_empty() && !value.is_empty() {
+                    values.insert(key.to_owned(), value.to_owned());
+                }
             }
         }
-        for key in ["DENUE_TOKEN", "INEGI_TOKEN", "BANXICO_TOKEN"] {
-            if let Ok(v) = std::env::var(key) {
-                values.insert(key.into(), v);
-            }
-        }
-        let denue = values.get("DENUE_TOKEN").cloned().unwrap_or_default();
-        Ok(Secrets {
+        let denue = values
+            .get("DENUE_TOKEN")
+            .cloned()
+            .or_else(|| embedded_default("DENUE_TOKEN"))
+            .unwrap_or_default();
+        Secrets {
             inegi: values
                 .get("INEGI_TOKEN")
                 .cloned()
+                .or_else(|| embedded_default("INEGI_TOKEN"))
                 .unwrap_or_else(|| denue.clone()),
             denue,
-            banxico: values.get("BANXICO_TOKEN").cloned().unwrap_or_default(),
-        })
+            banxico: values
+                .get("BANXICO_TOKEN")
+                .cloned()
+                .or_else(|| embedded_default("BANXICO_TOKEN"))
+                .unwrap_or_default(),
+        }
     }
+}
+/// Tokens travel in request paths and headers: accept only a conservative character set.
+pub fn token_shape_ok(token: &str) -> bool {
+    (16..=128).contains(&token.len())
+        && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+impl AppPaths {
     pub fn write_secrets(&self, values: &Secrets) -> Result<()> {
+        // TODO: Migrar escritura a Apple Keychain en macOS e iOS manteniendo respaldo para PROSPECTOS_HOME aislado.
         if [&values.denue, &values.inegi, &values.banxico]
             .iter()
             .any(|s| s.contains(['\n', '\r']))
@@ -90,6 +114,29 @@ impl AppPaths {
         )
     }
 }
+#[cfg(feature = "embedded-tokens")]
+const _: () = {
+    if option_env!("GITHUB_ACTIONS").is_some() || option_env!("CI").is_some() {
+        panic!("La feature `embedded-tokens` está prohibida en CI y releases públicos.");
+    }
+};
+#[cfg(feature = "embedded-tokens")]
+fn embedded_default(key: &str) -> Option<String> {
+    let value = match key {
+        "DENUE_TOKEN" => option_env!("DENUE_TOKEN"),
+        "INEGI_TOKEN" => option_env!("INEGI_TOKEN"),
+        "BANXICO_TOKEN" => option_env!("BANXICO_TOKEN"),
+        _ => None,
+    };
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+#[cfg(not(feature = "embedded-tokens"))]
+fn embedded_default(_key: &str) -> Option<String> {
+    None
+}
 #[derive(Clone, Default)]
 pub struct Secrets {
     pub denue: String,
@@ -97,6 +144,45 @@ pub struct Secrets {
     pub banxico: String,
 }
 // Deliberately no Debug/Serialize: never emit credentials into logs or snapshots.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoUpdatePeriod {
+    #[default]
+    Disabled,
+    Weekly,
+    Monthly,
+}
+impl AutoUpdatePeriod {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "disabled" => Some(Self::Disabled),
+            "weekly" => Some(Self::Weekly),
+            "monthly" => Some(Self::Monthly),
+            _ => None,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Disabled => "Desactivado (sólo manual)",
+            Self::Weekly => "Cada 1 semana (7 días)",
+            Self::Monthly => "Cada 1 mes (30 días)",
+        }
+    }
+    pub fn interval_days(self) -> Option<i64> {
+        match self {
+            Self::Disabled => None,
+            Self::Weekly => Some(7),
+            Self::Monthly => Some(30),
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -106,6 +192,8 @@ pub struct Settings {
     pub web_max_age_days: u32,
     pub inegi_max_age_days: u32,
     pub banxico_max_age_days: u32,
+    pub auto_update_period: AutoUpdatePeriod,
+    pub last_auto_update_date: String,
     pub owner_name: String,
     pub owner_whatsapp: String,
     pub owner_credential: String,
@@ -126,6 +214,8 @@ impl Default for Settings {
             web_max_age_days: 30,
             inegi_max_age_days: 30,
             banxico_max_age_days: 1,
+            auto_update_period: AutoUpdatePeriod::Disabled,
+            last_auto_update_date: String::new(),
             owner_name: "Tu nombre".into(),
             owner_whatsapp: String::new(),
             owner_credential: String::new(),
@@ -140,13 +230,26 @@ impl Default for Settings {
     }
 }
 impl Settings {
-    /// Desktop starts with the expanded territory; saved selections stay intentional.
+    /// A fresh desktop starts with CDMX only; saved selections stay intentional.
     pub fn load_desktop(paths: &AppPaths) -> Result<Self> {
         let mut settings = Self::load(paths)?;
         if !paths.home.join("settings.json").exists() {
-            settings.add_desktop_expansion();
+            settings.entities = vec!["09".into()];
         }
         Ok(settings)
+    }
+    /// Reports whether the user opted into periodic bounded updates and the fixed window elapsed.
+    pub fn auto_update_due(&self, today: chrono::NaiveDate) -> bool {
+        let Some(days) = self.auto_update_period.interval_days() else {
+            return false;
+        };
+        let last = self.last_auto_update_date.trim();
+        if last.is_empty() {
+            return true;
+        }
+        parse_date(last)
+            .map(|date| (today - date).num_days() >= days)
+            .unwrap_or(false)
     }
     /// Add the five recommended states without replacing an existing selection.
     pub fn add_desktop_expansion(&mut self) -> usize {
@@ -165,7 +268,11 @@ impl Settings {
         if !file.exists() {
             return Ok(Self::default());
         }
-        let mut s: Self = serde_json::from_slice(&std::fs::read(file)?)?;
+        Self::from_json(&std::fs::read(file)?)
+    }
+    /// Strictly parse, normalize and validate a `settings.json` payload.
+    pub fn from_json(bytes: &[u8]) -> Result<Self> {
+        let mut s: Self = serde_json::from_slice(bytes)?;
         s.entities = s
             .entities
             .iter()
@@ -238,6 +345,9 @@ impl Settings {
             || !["light", "dark"].contains(&self.theme.as_str())
         {
             return Err(invalid("Perfil o tema inválidos"));
+        }
+        if !self.last_auto_update_date.trim().is_empty() {
+            parse_date(self.last_auto_update_date.trim())?;
         }
         if self.entities.is_empty()
             || self.entities.iter().any(|e| {
@@ -363,10 +473,10 @@ mod persistence_tests {
         let paths = AppPaths::at(temp.path()).unwrap();
         assert_eq!(Settings::load(&paths).unwrap().entities, vec!["21", "29"]);
         let desktop = Settings::load_desktop(&paths).unwrap();
-        assert_eq!(
-            desktop.entities,
-            vec!["11", "14", "15", "19", "21", "22", "29"]
-        );
+        assert_eq!(desktop.entities, vec!["09"]);
+        assert!(token_shape_ok("00000000-0000-0000-0000-000000000000"));
+        assert!(!token_shape_ok("corto"));
+        assert!(!token_shape_ok("token/con/ruta-000000000000"));
         let mut settings = Settings {
             entities: vec!["09".into(), "21".into(), "29".into()],
             profile: "web_marketing".into(),
@@ -410,6 +520,24 @@ mod persistence_tests {
         settings.save(&paths).unwrap();
         assert_eq!(std::fs::read_dir(&paths.backups).unwrap().count(), 1);
     }
+
+    #[test]
+    fn auto_update_period_respects_fixed_weekly_and_monthly_intervals() {
+        let d = parse_date("2026-11-12").unwrap();
+        let mut settings = Settings::default();
+        assert!(!settings.auto_update_due(d));
+        settings.auto_update_period = AutoUpdatePeriod::Weekly;
+        assert!(settings.auto_update_due(d));
+        settings.last_auto_update_date = "2026-11-06".into();
+        assert!(!settings.auto_update_due(d));
+        settings.last_auto_update_date = "2026-11-05".into();
+        assert!(settings.auto_update_due(d));
+        settings.auto_update_period = AutoUpdatePeriod::Monthly;
+        settings.last_auto_update_date = "2026-10-14".into();
+        assert!(!settings.auto_update_due(d));
+        settings.last_auto_update_date = "2026-10-13".into();
+        assert!(settings.auto_update_due(d));
+    }
     #[test]
     fn invalid_limits_and_future_settings_versions_are_rejected() {
         let mut settings = Settings {
@@ -428,5 +556,68 @@ mod persistence_tests {
         assert_eq!(entity_name("09"), "Ciudad de México");
         assert_eq!(entity_name("1"), "Aguascalientes");
         assert_eq!(ENTITIES.len(), 32);
+    }
+    #[test]
+    fn secrets_ignore_comments_and_roundtrip_privately() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = AppPaths::at(temp.path()).unwrap();
+        if embedded_default("DENUE_TOKEN").is_none() {
+            assert!(paths.secrets().unwrap().denue.is_empty());
+        }
+        write_private(
+            &paths.home.join("credentials.env"),
+            b"# comentario con = signo\nDENUE_TOKEN='tok-denue'\nINEGI_TOKEN=\nBANXICO_TOKEN=\"tok-banxico\"\n",
+        )
+        .unwrap();
+        let loaded = paths.secrets().unwrap();
+        assert_eq!(loaded.denue, "tok-denue");
+        assert_eq!(loaded.inegi, "tok-denue");
+        assert_eq!(loaded.banxico, "tok-banxico");
+
+        paths
+            .write_secrets(&Secrets {
+                denue: "nuevo-denue".into(),
+                inegi: "nuevo-inegi".into(),
+                banxico: String::new(),
+            })
+            .unwrap();
+        let reloaded = paths.secrets().unwrap();
+        assert_eq!(reloaded.denue, "nuevo-denue");
+        assert_eq!(reloaded.inegi, "nuevo-inegi");
+        assert!(reloaded.banxico.is_empty());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(paths.home.join("credentials.env"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[cfg(feature = "embedded-tokens")]
+    #[test]
+    fn embedded_tokens_provide_defaults_and_user_file_overrides() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = AppPaths::at(temp.path()).unwrap();
+        let loaded = paths.secrets().unwrap();
+        if let Some(expected_denue) = option_env!("DENUE_TOKEN")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            assert_eq!(loaded.denue, expected_denue);
+        }
+        paths
+            .write_secrets(&Secrets {
+                denue: "override-denue".into(),
+                inegi: "override-inegi".into(),
+                banxico: String::new(),
+            })
+            .unwrap();
+        let overridden = paths.secrets().unwrap();
+        assert_eq!(overridden.denue, "override-denue");
+        assert_eq!(overridden.inegi, "override-inegi");
     }
 }

@@ -30,7 +30,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .simple-day-summary span { padding: 8px 11px; border: 1px solid #dbe4e1; border-radius: 9px; background: #fff; font-size: 14px; }
 .simple-notification, .simple-toast { display: flex; justify-content: space-between; gap: 18px; align-items: start; border-radius: 12px; margin-bottom: 18px; padding: 14px 16px; background: #fff8df; border: 1px solid #eadca6; }
 .simple-notification p { margin: 3px 0 0; color: #665c35; font-size: 14px; }
-.simple-notification button, .simple-toast button { border: 0; background: transparent; font-size: 20px; line-height: 1; color: inherit; }
+.simple-notification > button, .simple-toast > button { border: 0; background: transparent; font-size: 20px; line-height: 1; color: inherit; }
 .simple-toast { position: fixed; right: 26px; bottom: 26px; z-index: 1000; max-width: 500px; background: #17332d; color: #fff; border: 0; box-shadow: 0 12px 38px rgba(0,0,0,.2); }
 .simple-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
 .simple-workspace.with-detail { grid-template-columns: minmax(420px, 1fr) minmax(420px, .95fr); align-items: start; }

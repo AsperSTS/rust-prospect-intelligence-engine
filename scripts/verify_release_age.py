@@ -27,5 +27,6 @@ for package in lock['package']:
  if record.get('yanked') or published>cut:failures.append({'name':name,'version':package['version'],'published':record['pubtime'],'reason':'yanked or less than 7 days old'})
  else:checked+=1
 result={'checked':checked,'cutoff':cut.isoformat(),'failures':failures}
-(root/'docs/dependency-release-age.json').write_text(json.dumps(result,indent=2))
-print(json.dumps(result,indent=2));sys.exit(bool(failures))
+if '--check' not in sys.argv[1:]:
+ (root/'docs/dependency-release-age.json').write_text(json.dumps(result,indent=2))
+print(json.dumps(result,indent=2));sys.exit(bool(failures) or checked==0)
