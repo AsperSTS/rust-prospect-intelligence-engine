@@ -21,8 +21,8 @@ La mayoría de las plataformas de prospección cobran suscripciones en dólares 
 
 ## Plataformas
 
-- **macOS (Apple Silicon) y iOS:** aplicación nativa en escritorio (`Prospect Intelligence.app`) y punto de entrada móvil en desarrollo; los releases de macOS se publican en [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases).
-- **Windows (x64):** compilado, probado en CI y empaquetado como zip portable en [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases) (`ProspectIntelligence.exe` + `prospectos.exe`, aún pendiente de validación manual en hardware Windows real; requiere Microsoft Edge WebView2 Runtime, incluido en Windows 11).
+- **macOS (Apple Silicon) y iOS:** aplicación nativa en escritorio (`Prospect Intelligence.app` / instalador `.dmg`) y punto de entrada móvil en desarrollo; los releases de macOS se publican en [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases).
+- **Windows (x64):** compilado, probado en CI y publicado como ejecutable directo en [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases) (aún pendiente de validación manual en hardware Windows real; requiere Microsoft Edge WebView2 Runtime, incluido en Windows 11).
 
 ## Primer uso
 

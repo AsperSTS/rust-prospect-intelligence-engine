@@ -5,7 +5,7 @@ La aplicación de escritorio ya está generada en el directorio del proyecto. Se
 ## Entregables
 
 - `dist/Prospect Intelligence.app`: aplicación compilada para Apple Silicon (arm64).
-- Archivos de distribución sin DMG para release público (`.app.zip` y CLI `.tar.gz`, generados por CI y verificados con `SHA256SUMS.txt`).
+- Archivos de distribución para release público (`.dmg` y `.app.zip` de macOS, `.exe` de Windows, generados por CI y verificados con `SHA256SUMS.txt`).
 - `assets/app-icon.svg`: icono vectorial editable, creado para este proyecto.
 - `assets/app-icon.png`: render de 1024 px.
 - `assets/AppIcon.icns`: variantes del icono para macOS.
@@ -56,7 +56,7 @@ El empaquetador usa Cargo.lock y modo offline. En un equipo de desarrollo nuevo,
 3. **Distribución a otros usuarios:** terminar la auditoría legal de dependencias y fuentes, usar un identificador de aplicación propio y preparar firma Developer ID, Hardened Runtime y notarización. Apple documenta este proceso en [Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 4. **Actualizaciones:** preparar releases verificables y un canal de descarga; añadir actualizador firmado cuando la aplicación se distribuya fuera del proyecto.
 
-Esta compilación usa firma ad hoc local y no está notarizada. El archivo `.zip` facilita descargar e instalar la app, pero no sustituye la confianza de Developer ID para distribución externa. No se desactivan las protecciones de macOS.
+Esta compilación usa firma ad hoc local y no está notarizada. El archivo `.dmg` facilita descargar e instalar la app en Aplicaciones, pero no sustituye la confianza de Developer ID para distribución externa. No se desactivan las protecciones de macOS.
 
 Apple indica una membresía de 99 USD por año, o equivalente local, para su programa: [Apple Developer Program](https://developer.apple.com/programs/enroll/). El funcionamiento local de esta app sigue siendo gratuito. No se ha comprado una membresía ni enviado el paquete a Apple.
 

@@ -166,14 +166,11 @@ pub(super) fn ScopeTab(mut draft: Signal<Settings>, mut pane: Signal<usize>) -> 
                                 }
                             }
                         }
-                        p { class: "muted small st-note",
-                            "Al guardar se descargan los estados nuevos. Desmarcar uno no borra sus empresas."
-                        }
                     }
                     div { class: "st-block",
                         div { class: "st-block-head",
                             strong { "Tamaño del negocio" }
-                            span { class: "muted small", "Personas que trabajan en el negocio" }
+                            span { class: "muted small", "Empleados" }
                         }
                         div { class: "st-sizes", role: "group", aria_label: "Tamaño del negocio",
                             for (code, range, kind) in SIZES {
@@ -208,7 +205,7 @@ pub(super) fn ScopeTab(mut draft: Signal<Settings>, mut pane: Signal<usize>) -> 
                     div { class: "st-block",
                         div { class: "st-block-head",
                             strong { "Actualización automática" }
-                            span { class: "muted small", "Al abrir la app descarga el siguiente lote" }
+                            span { class: "muted small", "Al abrir la app" }
                         }
                         Segmented {
                             name: "Actualización automática",

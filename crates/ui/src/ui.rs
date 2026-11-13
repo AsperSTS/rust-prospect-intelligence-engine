@@ -2195,7 +2195,10 @@ mod review_tests {
         }
     }
 
-    fn make_test_ui_state(services: &crate::Services, settings_tab: usize) -> super::UiState {
+    pub(super) fn make_test_ui_state(
+        services: &crate::Services,
+        settings_tab: usize,
+    ) -> super::UiState {
         super::UiState {
             screen: Signal::new(super::Screen::Settings),
             settings_tab: Signal::new(settings_tab),
@@ -2320,7 +2323,7 @@ mod review_tests {
         let db = prospect_core::Db::open(paths).unwrap();
         assert!(temp.path().join("templates.toml").is_file());
 
-        // Tab 0: Perfil + un solo lienzo de plantillas con modo edición / vista previa
+        // Tab 0: Perfil + lienzo unificado de plantillas con bloques interactivos
         let mut dom0 = VirtualDom::new_with_props(SettingsProbe, SettingsProbeProps { tab: 0 })
             .with_root_context(crate::Services {
                 db: db.clone(),
@@ -2333,6 +2336,9 @@ mod review_tests {
         assert!(html0.contains("Base de datos y alcance"));
         assert!(html0.contains("Tokens y fuentes"));
         assert!(html0.contains(">Perfil<"));
+        assert!(html0.contains("st-collapse-btn"));
+        assert!(html0.contains("Ocultar perfil"));
+        assert!(html0.contains("aria-expanded=\"true\""));
         assert!(html0.contains(">Plantillas de mensajes<"));
         assert!(html0.contains("Ayuda sobre Perfil"));
         assert!(html0.contains("Ayuda sobre Plantillas de mensajes"));
@@ -2347,10 +2353,15 @@ mod review_tests {
         assert!(html0.contains("Página web"));
         assert!(html0.contains("Metas diarias"));
         assert!(!html0.contains(">Editar<"));
-        assert!(html0.contains("Vista previa en vivo"));
-        assert!(html0.contains("st-preview"));
-        assert!(html0.contains("st-prev-token"));
-        assert!(html0.contains("st-split-work"));
+        assert!(!html0.contains("Vista previa en vivo"));
+        assert!(!html0.contains("st-split-work"));
+        assert!(html0.contains("st-unified-card"));
+        assert!(html0.contains("st-prose-surface"));
+        assert!(html0.contains("st-token-pill own"));
+        assert!(html0.contains("st-token-pill biz"));
+        assert!(html0.contains("st-pill-del"));
+        assert!(html0.contains("Sofía Méndez"));
+        assert!(html0.contains("Taller Industrial del Valle"));
         assert!(html0.contains("st-new-btn"));
         assert!(!html0.contains("Tipo de plantilla"));
         for category in ["WhatsApp", "Correos", "Seguimientos", "Giros"] {
@@ -2359,9 +2370,6 @@ mod review_tests {
         assert!(!html0.contains("Asuntos de correo"));
         assert!(html0.contains("Quién lleva el área"));
         assert!(html0.contains("st-tpl-excerpt"));
-        assert!(html0.contains("st-canvas-text"));
-        assert!(html0.contains("st-rich-input"));
-        assert!(html0.contains("st-rich-token"));
         assert!(html0.contains("st-mini-pill"));
         assert!(html0.contains("Nuevo dato"));
         assert!(html0.contains("st-chip-info"));
@@ -2375,7 +2383,6 @@ mod review_tests {
         assert!(!html0.contains("{owner}"));
         assert!(!html0.contains("st-ed-block"));
         assert!(html0.contains("class=\"st-mini-pill own\">Nombre completo<"));
-        assert!(html0.contains("class=\"st-rich-lbl\">Nombre completo<"));
         assert!(!html0.contains("Audi México"));
 
         // Tab 1: Base de datos y alcance + Auto-update + Unified updates

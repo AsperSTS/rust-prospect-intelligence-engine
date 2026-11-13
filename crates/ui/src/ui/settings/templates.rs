@@ -1,5 +1,5 @@
-//! Visual message-template editor: visible category tabs, tokenized variant previews
-//! (no bracket clutter), single-surface rich block canvas, and live preview underneath.
+//! Visual unified message-template composer: visible category tabs, tokenized variant previews,
+//! single-surface interactive block canvas (drag, add, hover-inspect, delete), and live sample resolution.
 use super::*;
 use prospect_core::messages::{RESERVED_KEYS, data_key, email_subject_key_for_body};
 use std::collections::BTreeMap;
@@ -159,6 +159,53 @@ struct Item {
     excerpt_parts: Vec<RichPart>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct DraftState {
+    pub source: Signal<String>,
+    pub parsed: Signal<Option<Templates>>,
+}
+
+pub(super) fn templates_use_key(t: &Templates, key: &str) -> bool {
+    let needle = format!("{{{key}}}");
+    t.whatsapp.values().any(|v| v.contains(&needle))
+        || t.email.values().any(|v| v.contains(&needle))
+        || t.seguimiento.values().any(|v| v.contains(&needle))
+        || t.giros
+            .values()
+            .any(|g| g.values().any(|v| v.contains(&needle)))
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ProfileVars {
+    owner_name: String,
+    owner_credential: String,
+    owner_whatsapp: String,
+    owner_portfolio: String,
+    owner_linkedin: String,
+    owner_website: String,
+}
+
+impl ProfileVars {
+    fn from_settings(s: &Settings) -> Self {
+        Self {
+            owner_name: s.owner_name.clone(),
+            owner_credential: s.owner_credential.clone(),
+            owner_whatsapp: s.owner_whatsapp.clone(),
+            owner_portfolio: s.owner_portfolio.clone(),
+            owner_linkedin: s.owner_linkedin.clone(),
+            owner_website: s.owner_website.clone(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct TagsBundle {
+    biz_tags: Vec<ResolvedTag>,
+    own_tags: Vec<ResolvedTag>,
+    tags: BTreeMap<String, ResolvedTag>,
+    pairs: Vec<(String, String)>,
+}
+
 /// (`{key}`, `[Etiqueta]`) for built-in data plus the user's reusable data.
 pub(super) fn tag_pairs(datos: &BTreeMap<String, String>) -> Vec<(String, String)> {
     BUILTIN_TAGS
@@ -172,12 +219,6 @@ pub(super) fn tag_pairs(datos: &BTreeMap<String, String>) -> Vec<(String, String
         .collect()
 }
 
-pub(super) fn to_friendly_text(raw: &str, pairs: &[(String, String)]) -> String {
-    pairs.iter().fold(raw.to_owned(), |text, (key, label)| {
-        text.replace(key, label)
-    })
-}
-
 pub(super) fn from_friendly_text(friendly: &str, pairs: &[(String, String)]) -> String {
     pairs
         .iter()
@@ -186,21 +227,25 @@ pub(super) fn from_friendly_text(friendly: &str, pairs: &[(String, String)]) -> 
         })
 }
 
-/// Applies one change to the template draft; the draft stays untouched when it would be invalid.
+/// Applies one change to the template draft without re-parsing TOML on every edit.
 pub(super) fn mutate(
-    mut tpl: Signal<String>,
+    mut tpl: DraftState,
     mut error: Signal<String>,
     change: impl FnOnce(&mut Templates),
 ) {
-    let Ok(mut parsed) = Templates::parse_toml(&tpl.peek()) else {
+    let cached = tpl.parsed.peek().clone();
+    let Some(mut parsed) = cached.or_else(|| Templates::parse_toml(&tpl.source.peek()).ok()) else {
         error.set("No se pudo actualizar la plantilla actual.".into());
         return;
     };
     change(&mut parsed);
     match parsed.validate().and_then(|()| parsed.to_toml()) {
         Ok(serialized) => {
-            tpl.set(serialized);
-            error.set(String::new());
+            tpl.parsed.set(Some(parsed));
+            tpl.source.set(serialized);
+            if !error.peek().is_empty() {
+                error.set(String::new());
+            }
         }
         Err(e) => error.set(e.to_string()),
     }
@@ -215,7 +260,7 @@ fn effective_owner(owner_name: &str) -> String {
     }
 }
 
-fn resolved_tag(key: &str, t: &Templates, settings: &Settings) -> Option<ResolvedTag> {
+fn resolve_builtin_tag(meta: &TagMeta, vars: &ProfileVars) -> ResolvedTag {
     let pick = |raw: &str, fallback: &str| {
         if raw.trim().is_empty() {
             fallback.to_owned()
@@ -223,124 +268,95 @@ fn resolved_tag(key: &str, t: &Templates, settings: &Settings) -> Option<Resolve
             raw.trim().to_owned()
         }
     };
-    if let Some(meta) = BUILTIN_TAGS.iter().find(|m| m.key == key) {
-        let sample = match meta.key {
-            "owner" => effective_owner(&settings.owner_name),
-            "owner_corto" => {
-                let full = effective_owner(&settings.owner_name);
-                full.split_whitespace().next().unwrap_or(&full).to_owned()
-            }
-            "credencial" => pick(&settings.owner_credential, meta.fallback),
-            "whatsapp" => pick(&settings.owner_whatsapp, meta.fallback),
-            "portafolio" => pick(&settings.owner_portfolio, meta.fallback),
-            "linkedin" => pick(&settings.owner_linkedin, meta.fallback),
-            "web" => pick(&settings.owner_website, meta.fallback),
-            _ => meta.fallback.to_owned(),
-        };
-        return Some(ResolvedTag {
-            key: meta.key.to_owned(),
-            label: meta.label.to_owned(),
-            own: meta.own,
-            description: meta.description,
-            sample,
-        });
+    let sample = match meta.key {
+        "owner" => effective_owner(&vars.owner_name),
+        "owner_corto" => {
+            let full = effective_owner(&vars.owner_name);
+            full.split_whitespace().next().unwrap_or(&full).to_owned()
+        }
+        "credencial" => pick(&vars.owner_credential, meta.fallback),
+        "whatsapp" => pick(&vars.owner_whatsapp, meta.fallback),
+        "portafolio" => pick(&vars.owner_portfolio, meta.fallback),
+        "linkedin" => pick(&vars.owner_linkedin, meta.fallback),
+        "web" => pick(&vars.owner_website, meta.fallback),
+        _ => meta.fallback.to_owned(),
+    };
+    ResolvedTag {
+        key: meta.key.to_owned(),
+        label: meta.label.to_owned(),
+        own: meta.own,
+        description: meta.description,
+        sample,
     }
-    t.datos
-        .iter()
-        .find(|(label, _)| data_key(label) == key)
-        .map(|(label, val)| ResolvedTag {
-            key: key.to_owned(),
+}
+
+fn build_tags_bundle(vars: &ProfileVars, datos: &BTreeMap<String, String>) -> TagsBundle {
+    let pick = |raw: &str, fallback: &str| {
+        if raw.trim().is_empty() {
+            fallback.to_owned()
+        } else {
+            raw.trim().to_owned()
+        }
+    };
+    let mut biz_tags = Vec::with_capacity(6);
+    let mut own_tags = Vec::with_capacity(7 + datos.len());
+    let mut tags = BTreeMap::new();
+
+    for meta in BUILTIN_TAGS {
+        let tag = resolve_builtin_tag(&meta, vars);
+        if tag.own {
+            own_tags.push(tag.clone());
+        } else {
+            biz_tags.push(tag.clone());
+        }
+        tags.insert(tag.key.clone(), tag);
+    }
+    for (label, val) in datos {
+        let key = data_key(label);
+        let tag = ResolvedTag {
+            key: key.clone(),
             label: label.clone(),
             own: true,
             description: "Dato propio guardado en Perfil para reutilizar en cualquier plantilla.",
             sample: pick(val, label),
-        })
-}
-
-fn palette_tags(t: &Templates, settings: &Settings) -> Vec<ResolvedTag> {
-    BUILTIN_TAGS
-        .iter()
-        .filter_map(|m| resolved_tag(m.key, t, settings))
-        .chain(
-            t.datos
-                .keys()
-                .filter_map(|label| resolved_tag(&data_key(label), t, settings)),
-        )
-        .collect()
-}
-
-fn labels_ownership_map(tags: &[ResolvedTag]) -> BTreeMap<String, bool> {
-    tags.iter()
-        .map(|tag| (tag.label.clone(), tag.own))
-        .collect()
-}
-
-fn keys_label_map(tags: &[ResolvedTag]) -> BTreeMap<String, (String, bool)> {
-    tags.iter()
-        .map(|tag| (tag.key.clone(), (tag.label.clone(), tag.own)))
-        .collect()
-}
-
-type FriendlyTag = (String, bool);
-type FriendlySpan = (usize, usize, Option<FriendlyTag>);
-
-/// Splits a friendly string into alternating byte spans `[start..end]`, tagging recognized
-/// `[Label]` tokens while keeping exact UTF-8 byte offsets aligned 1:1 with the `<textarea>`.
-fn parse_friendly_spans(friendly: &str, labels: &BTreeMap<String, bool>) -> Vec<FriendlySpan> {
-    let mut out = Vec::new();
-    let mut cursor = 0usize;
-    let mut scan = 0usize;
-    while let Some(rel_open) = friendly[scan..].find('[') {
-        let open = scan + rel_open;
-        let after = open + 1;
-        let Some(rel_close) = friendly[after..].find(']') else {
-            break;
         };
-        let close = after + rel_close;
-        let candidate = &friendly[after..close];
-        if !candidate.contains(['[', '\n', '\r'])
-            && let Some(&own) = labels.get(candidate)
-        {
-            if open > cursor {
-                out.push((cursor, open, None));
-            }
-            out.push((open, close + 1, Some((candidate.to_owned(), own))));
-            cursor = close + 1;
-            scan = close + 1;
-        } else {
-            scan = after;
-        }
+        own_tags.push(tag.clone());
+        tags.insert(key, tag);
     }
-    if cursor < friendly.len() {
-        out.push((cursor, friendly.len(), None));
+    TagsBundle {
+        biz_tags,
+        own_tags,
+        tags,
+        pairs: tag_pairs(datos),
     }
-    out
 }
 
-fn common_prefix_bytes(a: &str, b: &str) -> usize {
-    let mut idx = 0;
-    for (ca, cb) in a.chars().zip(b.chars()) {
-        if ca != cb {
-            break;
-        }
-        idx += ca.len_utf8();
-    }
-    idx
+#[cfg(test)]
+fn palette_tags(t: &Templates, settings: &Settings) -> Vec<ResolvedTag> {
+    let vars = ProfileVars::from_settings(settings);
+    let bundle = build_tags_bundle(&vars, &t.datos);
+    bundle.biz_tags.into_iter().chain(bundle.own_tags).collect()
 }
 
-fn common_suffix_bytes(a: &str, b: &str) -> usize {
-    let mut idx = 0;
-    for (ca, cb) in a.chars().rev().zip(b.chars().rev()) {
-        if ca != cb {
-            break;
-        }
-        idx += ca.len_utf8();
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct TemplateDoc {
+    /// Length is always `blocks.len() + 1`; `slots[i]` precedes `blocks[i]`.
+    slots: Vec<String>,
+    blocks: Vec<String>,
+}
+
+fn clamp_char_boundary(s: &str, idx: usize) -> usize {
+    let mut pos = idx.min(s.len());
+    while pos > 0 && !s.is_char_boundary(pos) {
+        pos -= 1;
     }
-    idx
+    pos
 }
 
 fn collapse_join_spaces(left: &str, right: &str) -> String {
-    if left.ends_with(' ') && right.starts_with(' ') {
+    if left.ends_with(' ') && right.starts_with(['.', ',', ';', ':', '?', '!', ')']) {
+        format!("{}{right}", &left[..left.len() - 1])
+    } else if left.ends_with(' ') && right.starts_with(' ') {
         format!("{left}{}", &right[1..])
     } else if left.is_empty() && right.starts_with(' ') {
         right[1..].to_owned()
@@ -349,103 +365,222 @@ fn collapse_join_spaces(left: &str, right: &str) -> String {
     }
 }
 
-/// Keeps word-boundary spacing clean around newly inserted/dropped tokens without altering
-/// existing prose or tight punctuation (`,`, `.`, `:`, `?`, `!`).
-fn ensure_new_token_spacing(
-    friendly: &str,
-    edit_start: usize,
-    edit_end: usize,
-    labels: &BTreeMap<String, bool>,
-) -> String {
-    let spans = parse_friendly_spans(friendly, labels);
-    let mut out = String::with_capacity(friendly.len() + 4);
-    for (start, end, tag) in spans {
-        let chunk = &friendly[start..end];
-        if tag.is_some() && end > edit_start && start < edit_end {
-            if let Some(prev_ch) = out.chars().next_back()
-                && (prev_ch.is_alphanumeric() || prev_ch == ']')
-            {
-                out.push(' ');
+impl TemplateDoc {
+    fn parse(raw: &str, tags: &BTreeMap<String, ResolvedTag>) -> Self {
+        let mut slots = Vec::new();
+        let mut blocks = Vec::new();
+        let mut cursor = 0usize;
+        let mut scan = 0usize;
+        while let Some(rel_open) = raw[scan..].find('{') {
+            let open = scan + rel_open;
+            let after = open + 1;
+            let Some(rel_close) = raw[after..].find('}') else {
+                break;
+            };
+            let close = after + rel_close;
+            let key = &raw[after..close];
+            if !key.contains(['{', '\n', '\r']) && tags.contains_key(key) {
+                slots.push(raw[cursor..open].to_owned());
+                blocks.push(key.to_owned());
+                cursor = close + 1;
+                scan = close + 1;
+            } else {
+                scan = after;
             }
-            out.push_str(chunk);
-            if let Some(next_ch) = friendly[end..].chars().next()
-                && (next_ch.is_alphanumeric() || next_ch == '[')
-            {
-                out.push(' ');
-            }
-        } else {
-            out.push_str(chunk);
         }
+        slots.push(raw[cursor..].to_owned());
+        Self { slots, blocks }
+    }
+
+    fn to_raw(&self) -> String {
+        let mut out = String::new();
+        for (i, slot) in self.slots.iter().enumerate() {
+            out.push_str(slot);
+            if let Some(key) = self.blocks.get(i) {
+                out.push('{');
+                out.push_str(key);
+                out.push('}');
+            }
+        }
+        out
+    }
+
+    fn insert_block_at(&mut self, slot_idx: usize, byte_offset: usize, key: String) -> usize {
+        let idx = slot_idx.min(self.slots.len().saturating_sub(1));
+        let cut = clamp_char_boundary(&self.slots[idx], byte_offset);
+        let mut left = self.slots[idx][..cut].to_owned();
+        let mut right = self.slots[idx][cut..].to_owned();
+
+        let needs_space_after_prev_block = idx > 0 && cut == 0;
+        if needs_space_after_prev_block
+            || left.chars().next_back().is_some_and(|c| {
+                c.is_alphanumeric() || matches!(c, '.' | ',' | ';' | ':' | ')' | '?' | '!')
+            })
+        {
+            left.push(' ');
+        }
+
+        if right
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '(' | '¿' | '¡'))
+        {
+            right.insert(0, ' ');
+        }
+
+        self.slots[idx] = left;
+        self.slots.insert(idx + 1, right);
+        self.blocks.insert(idx, key);
+        idx + 1
+    }
+
+    fn remove_block(&mut self, block_idx: usize) -> usize {
+        if block_idx >= self.blocks.len() {
+            return self.slots.len().saturating_sub(1);
+        }
+        self.blocks.remove(block_idx);
+        let right = self.slots.remove(block_idx + 1);
+        let merged = collapse_join_spaces(&self.slots[block_idx], &right);
+        self.slots[block_idx] = merged;
+        block_idx
+    }
+
+    fn move_block(&mut self, from_block: usize, to_slot: usize, byte_offset: usize) -> usize {
+        if from_block >= self.blocks.len() {
+            return from_block;
+        }
+        let target_slot = to_slot.min(self.slots.len().saturating_sub(1));
+        if (target_slot == from_block && byte_offset >= self.slots[from_block].len())
+            || (target_slot == from_block + 1 && byte_offset == 0)
+        {
+            return from_block;
+        }
+        let key = self.blocks[from_block].clone();
+        // Insert first so the original byte offsets remain exact, then remove the old block.
+        self.insert_block_at(target_slot, byte_offset, key);
+        if target_slot <= from_block {
+            self.remove_block(from_block + 1);
+            target_slot
+        } else {
+            self.remove_block(from_block);
+            target_slot.saturating_sub(1)
+        }
+    }
+
+    fn nudge_block(&mut self, block_idx: usize, dir_right: bool) -> usize {
+        if block_idx >= self.blocks.len() {
+            return block_idx;
+        }
+        if dir_right {
+            let right_slot = &self.slots[block_idx + 1];
+            if right_slot.trim().is_empty() {
+                if block_idx + 1 < self.blocks.len() {
+                    let next_len = self.slots[block_idx + 2].len();
+                    return self.move_block(block_idx, block_idx + 2, next_len);
+                }
+                return block_idx;
+            }
+            let next_cut = next_word_end(right_slot);
+            self.move_block(block_idx, block_idx + 1, next_cut)
+        } else {
+            let left_slot = &self.slots[block_idx];
+            if left_slot.trim().is_empty() {
+                if block_idx > 0 {
+                    return self.move_block(block_idx, block_idx - 1, 0);
+                }
+                return block_idx;
+            }
+            let prev_cut = prev_word_start(left_slot);
+            self.move_block(block_idx, block_idx, prev_cut)
+        }
+    }
+
+    fn expand_inline_tokens(
+        &mut self,
+        slot_idx: usize,
+        pairs: &[(String, String)],
+        tags: &BTreeMap<String, ResolvedTag>,
+    ) -> Option<usize> {
+        let slot = self.slots.get(slot_idx)?;
+        if !((slot.contains('{') && slot.contains('}'))
+            || (slot.contains('[') && slot.contains(']')))
+        {
+            return None;
+        }
+        let normalized = from_friendly_text(slot, pairs);
+        let parsed = Self::parse(&normalized, tags);
+        if parsed.blocks.is_empty() {
+            return None;
+        }
+        let inserted = parsed.blocks.len();
+        let mut parsed_slots = parsed.slots.into_iter();
+        if let Some(first) = parsed_slots.next() {
+            self.slots[slot_idx] = first;
+        }
+        for (offset, (key, tail)) in parsed.blocks.into_iter().zip(parsed_slots).enumerate() {
+            self.blocks.insert(slot_idx + offset, key);
+            self.slots.insert(slot_idx + offset + 1, tail);
+        }
+        Some(slot_idx + inserted)
+    }
+}
+
+fn next_word_end(s: &str) -> usize {
+    let mut in_word = false;
+    for (idx, ch) in s.char_indices() {
+        if !ch.is_whitespace() {
+            in_word = true;
+        } else if in_word {
+            return idx;
+        }
+    }
+    s.len()
+}
+
+fn prev_word_start(s: &str) -> usize {
+    let trimmed = s.trim_end();
+    for (idx, ch) in trimmed.char_indices().rev() {
+        if ch.is_whitespace() {
+            return idx + ch.len_utf8();
+        }
+    }
+    0
+}
+
+fn split_lines_with_offsets(slot: &str) -> Vec<(usize, &str)> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    for (idx, ch) in slot.char_indices() {
+        if ch == '\n' {
+            out.push((start, &slot[start..idx]));
+            start = idx + 1;
+        }
+    }
+    out.push((start, &slot[start..]));
+    out
+}
+
+fn split_word_pieces(line: &str, line_start: usize) -> Vec<(usize, usize, &str)> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut chars = line.char_indices().peekable();
+    while let Some(&(idx, ch)) = chars.peek() {
+        let is_ws = ch.is_whitespace();
+        while let Some(&(_, next_ch)) = chars.peek() {
+            if next_ch.is_whitespace() != is_ws {
+                break;
+            }
+            chars.next();
+        }
+        let end = chars.peek().map_or(line.len(), |&(i, _)| i);
+        out.push((line_start + start, line_start + end, &line[start..end]));
+        start = end;
+        let _ = idx;
     }
     out
 }
 
-/// Enforces atomic block semantics on a single continuous `<textarea>`:
-/// - Deleting any character inside/touching an intact `[Label]` removes the entire block once.
-/// - Typing inside an intact `[Label]` pushes the new text just outside the block cleanly.
-/// - Dropping/pasting a new `[Label]` between words keeps single-space separation intact.
-fn normalize_block_edit(
-    prev_friendly: &str,
-    typed_raw: &str,
-    pairs: &[(String, String)],
-    labels: &BTreeMap<String, bool>,
-) -> String {
-    let typed = to_friendly_text(typed_raw, pairs);
-    if typed == prev_friendly {
-        return typed;
-    }
-
-    let prefix = common_prefix_bytes(prev_friendly, &typed);
-    let suffix = common_suffix_bytes(&prev_friendly[prefix..], &typed[prefix..]);
-    let prev_end = prev_friendly.len() - suffix;
-    let typed_end = typed.len() - suffix;
-    let typed_mid = &typed[prefix..typed_end];
-    let prev_spans = parse_friendly_spans(prev_friendly, labels);
-
-    if typed_mid.is_empty() && prefix < prev_end {
-        for (ts, te, tag) in &prev_spans {
-            if tag.is_some() && prefix >= *ts && prev_end <= *te {
-                return collapse_join_spaces(&prev_friendly[..*ts], &prev_friendly[*te..]);
-            }
-        }
-    }
-
-    if prefix == prev_end && !typed_mid.is_empty() && !typed_mid.contains('\n') {
-        for (ts, te, tag) in &prev_spans {
-            if tag.is_some() && prefix > *ts && prefix < *te {
-                let left_half = prefix - *ts <= (*te - *ts) / 2;
-                let cut = if left_half { *ts } else { *te };
-                return format!(
-                    "{}{typed_mid}{}",
-                    &prev_friendly[..cut],
-                    &prev_friendly[cut..]
-                );
-            }
-        }
-    }
-
-    let contains_new_tag = parse_friendly_spans(typed_mid, labels)
-        .iter()
-        .any(|(_, _, tag)| tag.is_some())
-        || parse_friendly_spans(&typed, labels)
-            .iter()
-            .any(|(s, e, tag)| tag.is_some() && *e > prefix && *s < typed_end);
-    if contains_new_tag {
-        return ensure_new_token_spacing(&typed, prefix, typed_end, labels);
-    }
-    typed
-}
-
-fn append_token_spacing(existing: &str, label: &str) -> String {
-    let token = format!("[{label}]");
-    if existing.is_empty() || existing.ends_with([' ', '\n', '\r', '(', '¿', '¡']) {
-        format!("{existing}{token}")
-    } else {
-        format!("{existing} {token}")
-    }
-}
-
-fn raw_to_rich_parts(raw: &str, tags_by_key: &BTreeMap<String, (String, bool)>) -> Vec<RichPart> {
+fn raw_to_rich_parts(raw: &str, tags_by_key: &BTreeMap<String, ResolvedTag>) -> Vec<RichPart> {
     let mut parts = Vec::new();
     let mut rest = raw;
     while let Some(open) = rest.find('{') {
@@ -455,14 +590,14 @@ fn raw_to_rich_parts(raw: &str, tags_by_key: &BTreeMap<String, (String, bool)>) 
         };
         let key = &after[..close];
         if !key.contains(['{', '\n', '\r'])
-            && let Some((label, own)) = tags_by_key.get(key)
+            && let Some(tag) = tags_by_key.get(key)
         {
             if open > 0 {
                 parts.push(RichPart::Text(rest[..open].to_owned()));
             }
             parts.push(RichPart::Tag {
-                label: label.clone(),
-                own: *own,
+                label: tag.label.clone(),
+                own: tag.own,
             });
             rest = &after[close + 1..];
         } else {
@@ -502,10 +637,10 @@ fn compact_whitespace_run(raw: &str) -> String {
 }
 
 /// Builds inline visual parts for sidebar previews and email titles with zero `[...]` brackets,
-/// truncating cleanly on word or tag boundaries.
+/// truncating cleanly on word or tag boundaries without allocating a char buffer.
 fn clip_rich_parts(
     raw: &str,
-    tags_by_key: &BTreeMap<String, (String, bool)>,
+    tags_by_key: &BTreeMap<String, ResolvedTag>,
     max_chars: usize,
 ) -> Vec<RichPart> {
     let raw_parts = raw_to_rich_parts(raw, tags_by_key);
@@ -515,25 +650,29 @@ fn clip_rich_parts(
     for (idx, part) in raw_parts.into_iter().enumerate() {
         match part {
             RichPart::Text(txt) => {
-                let mut clean = compact_whitespace_run(&txt);
+                let compact = compact_whitespace_run(&txt);
+                let mut slice = compact.as_str();
                 if idx == 0 {
-                    clean = clean.trim_start().to_owned();
+                    slice = slice.trim_start();
                 }
                 if idx + 1 == total {
-                    clean = clean.trim_end().to_owned();
+                    slice = slice.trim_end();
                 }
-                if clean.is_empty() {
+                if slice.is_empty() {
                     continue;
                 }
-                let chars: Vec<char> = clean.chars().collect();
-                if used + chars.len() <= max_chars {
-                    used += chars.len();
-                    push_rich_text(&mut out, &clean);
+                let char_count = slice.chars().count();
+                if used + char_count <= max_chars {
+                    used += char_count;
+                    push_rich_text(&mut out, slice);
                 } else {
                     let room = max_chars.saturating_sub(used);
                     if room > 0 {
-                        let snippet: String = chars.into_iter().take(room).collect();
-                        let trimmed = snippet.trim_end();
+                        let cut = slice
+                            .char_indices()
+                            .nth(room)
+                            .map_or(slice.len(), |(pos, _)| pos);
+                        let trimmed = slice[..cut].trim_end();
                         if !trimmed.is_empty() {
                             push_rich_text(&mut out, trimmed);
                         }
@@ -634,9 +773,18 @@ fn stage_info(key: &str) -> (usize, &'static str) {
     }
 }
 
+#[cfg(test)]
 fn items(t: &Templates, category: usize, settings: &Settings) -> Vec<Item> {
-    let tags = palette_tags(t, settings);
-    let tags_by_key = keys_label_map(&tags);
+    let vars = ProfileVars::from_settings(settings);
+    let bundle = build_tags_bundle(&vars, &t.datos);
+    items_with_tags(t, category, &bundle.tags)
+}
+
+fn items_with_tags(
+    t: &Templates,
+    category: usize,
+    tags_by_key: &BTreeMap<String, ResolvedTag>,
+) -> Vec<Item> {
     match category {
         0 => t
             .whatsapp
@@ -659,7 +807,7 @@ fn items(t: &Templates, category: usize, settings: &Settings) -> Vec<Item> {
                     title_parts: vec![RichPart::Text(plain_title.clone())],
                     plain_title,
                     hint,
-                    excerpt_parts: clip_rich_parts(body, &tags_by_key, 86),
+                    excerpt_parts: clip_rich_parts(body, tags_by_key, 86),
                 }
             })
             .collect(),
@@ -674,7 +822,7 @@ fn items(t: &Templates, category: usize, settings: &Settings) -> Vec<Item> {
                 .enumerate()
                 .map(|(i, k)| {
                     let subj = email_subject_of(t, k);
-                    let mut title_parts = clip_rich_parts(&subj, &tags_by_key, 48);
+                    let mut title_parts = clip_rich_parts(&subj, tags_by_key, 48);
                     let mut plain_title = plain_title_from_parts(&title_parts);
                     if plain_title.is_empty() {
                         plain_title = format!("Correo sin asunto {}", i + 1);
@@ -690,7 +838,7 @@ fn items(t: &Templates, category: usize, settings: &Settings) -> Vec<Item> {
                         title_parts,
                         plain_title,
                         hint,
-                        excerpt_parts: clip_rich_parts(&t.email[k], &tags_by_key, 86),
+                        excerpt_parts: clip_rich_parts(&t.email[k], tags_by_key, 86),
                     }
                 })
                 .collect()
@@ -714,7 +862,7 @@ fn items(t: &Templates, category: usize, settings: &Settings) -> Vec<Item> {
                         title_parts: vec![RichPart::Text(plain_title.clone())],
                         plain_title,
                         hint: String::new(),
-                        excerpt_parts: clip_rich_parts(&t.seguimiento[k], &tags_by_key, 86),
+                        excerpt_parts: clip_rich_parts(&t.seguimiento[k], tags_by_key, 86),
                     }
                 })
                 .collect()
@@ -880,16 +1028,76 @@ fn resolve_preview_parts(
     out
 }
 
-fn preview_char_len(parts: &[PreviewPart]) -> usize {
+fn plain_sample_text(parts: &[PreviewPart]) -> String {
     parts
         .iter()
         .map(|part| match part {
-            PreviewPart::Text(s) | PreviewPart::Block { value: s, .. } => s.chars().count(),
+            PreviewPart::Text(s) | PreviewPart::Block { value: s, .. } => s.as_str(),
         })
-        .sum()
+        .collect()
 }
 
-fn new_datum_error(t: &Templates, label: &str) -> Option<&'static str> {
+fn count_doc_words(doc: &TemplateDoc, tags: &BTreeMap<String, ResolvedTag>) -> usize {
+    let mut words = 0usize;
+    let mut in_word = false;
+    let mut scan = |s: &str| {
+        for ch in s.chars() {
+            if ch.is_whitespace() {
+                in_word = false;
+            } else if !in_word {
+                in_word = true;
+                words += 1;
+            }
+        }
+    };
+    for (idx, slot) in doc.slots.iter().enumerate() {
+        scan(slot);
+        if let Some(key) = doc.blocks.get(idx) {
+            if let Some(tag) = tags.get(key) {
+                scan(&tag.sample);
+            } else {
+                scan("{");
+                scan(key);
+                scan("}");
+            }
+        }
+    }
+    words
+}
+
+fn count_doc_chars(doc: &TemplateDoc, tags: &BTreeMap<String, ResolvedTag>) -> usize {
+    doc.slots.iter().map(|s| s.chars().count()).sum::<usize>()
+        + doc
+            .blocks
+            .iter()
+            .map(|key| {
+                tags.get(key)
+                    .map_or(key.chars().count() + 2, |tag| tag.sample.chars().count())
+            })
+            .sum::<usize>()
+}
+
+fn doc_to_sample_string(doc: &TemplateDoc, tags: &BTreeMap<String, ResolvedTag>) -> String {
+    let mut out = String::new();
+    for (idx, slot) in doc.slots.iter().enumerate() {
+        out.push_str(slot);
+        if let Some(key) = doc.blocks.get(idx) {
+            if let Some(tag) = tags.get(key) {
+                out.push_str(&tag.sample);
+            } else {
+                out.push('{');
+                out.push_str(key);
+                out.push('}');
+            }
+        }
+    }
+    out
+}
+
+fn new_datum_error_in_keys<'a>(
+    existing_keys: impl IntoIterator<Item = &'a String>,
+    label: &str,
+) -> Option<&'static str> {
     let key = data_key(label);
     if key.is_empty() {
         Some("Ponle un nombre al dato.")
@@ -899,7 +1107,9 @@ fn new_datum_error(t: &Templates, label: &str) -> Option<&'static str> {
         || BUILTIN_TAGS
             .iter()
             .any(|meta| meta.label.eq_ignore_ascii_case(label))
-        || t.datos.keys().any(|existing| data_key(existing) == key)
+        || existing_keys
+            .into_iter()
+            .any(|existing| data_key(existing) == key)
     {
         Some("Ya existe un dato con ese nombre.")
     } else {
@@ -907,42 +1117,216 @@ fn new_datum_error(t: &Templates, label: &str) -> Option<&'static str> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-struct EditorSignals {
-    tpl: Signal<String>,
-    error: Signal<String>,
-    active_field: Signal<EditorField>,
-    hovered_tag: Signal<Option<String>>,
-    mounted_inputs: Signal<BTreeMap<EditorField, Rc<MountedData>>>,
-    pending_focus: Signal<Option<EditorField>>,
+#[cfg(test)]
+fn new_datum_error(t: &Templates, label: &str) -> Option<&'static str> {
+    new_datum_error_in_keys(t.datos.keys(), label)
 }
 
-#[derive(Clone, PartialEq)]
-struct EditorDocContext {
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum DragPayload {
+    AddKey(String),
+    MoveBlock {
+        field: EditorField,
+        block_idx: usize,
+        key: String,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct DropPos {
+    field: EditorField,
+    slot_idx: usize,
+    byte_offset: usize,
+}
+
+type SlotTarget = (EditorField, usize);
+type MountedSlot = (SlotTarget, Rc<MountedData>);
+
+#[derive(Clone, Copy, PartialEq)]
+struct EditorSignals {
+    tpl: DraftState,
+    error: Signal<String>,
+    cursor_slot: Signal<SlotTarget>,
+    editing_slot: Signal<Option<SlotTarget>>,
+    pending_focus: Signal<Option<SlotTarget>>,
+    mounted_slot: Signal<Option<MountedSlot>>,
+    selected_block: Signal<Option<SlotTarget>>,
+    hovered_tag: Signal<Option<String>>,
+    drag_payload: Signal<Option<DragPayload>>,
+    drop_target: Signal<Option<DropPos>>,
+}
+
+fn set_drop_target(mut sig: Signal<Option<DropPos>>, pos: DropPos) {
+    if *sig.peek() != Some(pos) {
+        sig.set(Some(pos));
+    }
+}
+
+fn set_hovered_tag(mut sig: Signal<Option<String>>, next: &str) {
+    if sig.peek().as_deref() != Some(next) {
+        sig.set(Some(next.to_owned()));
+    }
+}
+
+fn clear_hovered_tag(mut sig: Signal<Option<String>>, expected: &str) {
+    if sig.peek().as_deref() == Some(expected) {
+        sig.set(None);
+    }
+}
+
+fn current_field_raw(
+    tpl: &DraftState,
     category: usize,
-    template_key: String,
-    subject_raw: String,
-    body_raw: String,
-    pairs: Vec<(String, String)>,
-    labels: BTreeMap<String, bool>,
-    tags: BTreeMap<String, ResolvedTag>,
+    template_key: &str,
+    field: EditorField,
+) -> String {
+    let cached = tpl.parsed.peek().clone();
+    let Some(t) = cached.or_else(|| Templates::parse_toml(&tpl.source.peek()).ok()) else {
+        return String::new();
+    };
+    if category == 1 && field == EditorField::Subject {
+        email_subject_of(&t, template_key)
+    } else {
+        text_of(&t, category, template_key)
+    }
+}
+
+fn current_field_doc(
+    tpl: &DraftState,
+    category: usize,
+    template_key: &str,
+    field: EditorField,
+    tags: &BTreeMap<String, ResolvedTag>,
+) -> TemplateDoc {
+    let raw = current_field_raw(tpl, category, template_key, field);
+    TemplateDoc::parse(&raw, tags)
+}
+
+fn store_key_for(category: usize, template_key: &str, field: EditorField) -> String {
+    if category == 1 && field == EditorField::Subject {
+        email_subject_key_for_body(template_key)
+    } else {
+        template_key.to_owned()
+    }
 }
 
 fn write_template_field(
     ed: EditorSignals,
     category: usize,
-    template_key: String,
+    template_key: &str,
     field: EditorField,
     next_raw: String,
 ) {
+    let store_key = store_key_for(category, template_key, field);
     mutate(ed.tpl, ed.error, move |t| {
-        let store_key = if category == 1 && field == EditorField::Subject {
-            email_subject_key_for_body(&template_key)
-        } else {
-            template_key
-        };
         section(t, category).insert(store_key, next_raw);
     });
+}
+
+fn begin_slot_edit(mut ed: EditorSignals, field: EditorField, slot_idx: usize) {
+    if ed.selected_block.peek().is_some() {
+        ed.selected_block.set(None);
+    }
+    ed.cursor_slot.set((field, slot_idx));
+    ed.editing_slot.set(Some((field, slot_idx)));
+    ed.pending_focus.set(Some((field, slot_idx)));
+}
+
+fn clear_editor_interaction(mut ed: EditorSignals, body_slots_len: usize) {
+    ed.editing_slot.set(None);
+    ed.pending_focus.set(None);
+    ed.mounted_slot.set(None);
+    ed.selected_block.set(None);
+    ed.hovered_tag.set(None);
+    ed.drag_payload.set(None);
+    ed.drop_target.set(None);
+    ed.cursor_slot
+        .set((EditorField::Body, body_slots_len.saturating_sub(1)));
+}
+
+fn remove_block(
+    mut ed: EditorSignals,
+    category: usize,
+    template_key: &str,
+    tags: &BTreeMap<String, ResolvedTag>,
+    field: EditorField,
+    block_idx: usize,
+    refocus: bool,
+) {
+    let mut doc = current_field_doc(&ed.tpl, category, template_key, field, tags);
+    let target_slot = doc.remove_block(block_idx);
+    ed.selected_block.set(None);
+    ed.hovered_tag.set(None);
+    ed.cursor_slot.set((field, target_slot));
+    if refocus {
+        ed.editing_slot.set(Some((field, target_slot)));
+        ed.pending_focus.set(Some((field, target_slot)));
+    }
+    write_template_field(ed, category, template_key, field, doc.to_raw());
+}
+
+fn apply_drop(
+    mut ed: EditorSignals,
+    category: usize,
+    template_key: &str,
+    tags: &BTreeMap<String, ResolvedTag>,
+    target_field: EditorField,
+    fallback_slot: usize,
+    fallback_byte: usize,
+) {
+    let Some(payload) = ed.drag_payload.peek().clone() else {
+        ed.drop_target.set(None);
+        return;
+    };
+    let pos = (*ed.drop_target.peek())
+        .filter(|p| p.field == target_field)
+        .unwrap_or(DropPos {
+            field: target_field,
+            slot_idx: fallback_slot,
+            byte_offset: fallback_byte,
+        });
+
+    ed.drag_payload.set(None);
+    ed.drop_target.set(None);
+    ed.selected_block.set(None);
+
+    match payload {
+        DragPayload::AddKey(key) => {
+            let mut doc = current_field_doc(&ed.tpl, category, template_key, target_field, tags);
+            let next_slot = doc.insert_block_at(pos.slot_idx, pos.byte_offset, key);
+            ed.cursor_slot.set((target_field, next_slot));
+            write_template_field(ed, category, template_key, target_field, doc.to_raw());
+        }
+        DragPayload::MoveBlock {
+            field: from_field,
+            block_idx,
+            key,
+        } => {
+            if from_field == target_field {
+                let mut doc =
+                    current_field_doc(&ed.tpl, category, template_key, target_field, tags);
+                let landed = doc.move_block(block_idx, pos.slot_idx, pos.byte_offset);
+                ed.cursor_slot.set((target_field, landed + 1));
+                write_template_field(ed, category, template_key, target_field, doc.to_raw());
+            } else {
+                let mut from_doc =
+                    current_field_doc(&ed.tpl, category, template_key, from_field, tags);
+                let mut to_doc =
+                    current_field_doc(&ed.tpl, category, template_key, target_field, tags);
+                from_doc.remove_block(block_idx);
+                let next_slot = to_doc.insert_block_at(pos.slot_idx, pos.byte_offset, key);
+                ed.cursor_slot.set((target_field, next_slot));
+                let from_store = store_key_for(category, template_key, from_field);
+                let to_store = store_key_for(category, template_key, target_field);
+                let from_raw = from_doc.to_raw();
+                let to_raw = to_doc.to_raw();
+                mutate(ed.tpl, ed.error, move |t| {
+                    section(t, category).insert(from_store, from_raw);
+                    section(t, category).insert(to_store, to_raw);
+                });
+            }
+        }
+    }
 }
 
 #[component]
@@ -964,107 +1348,469 @@ fn RichPartsView(parts: Vec<RichPart>) -> Element {
 }
 
 #[component]
-fn BlockCanvasField(
+fn UnifiedFieldSurface(
     field: EditorField,
-    title: &'static str,
-    meta_note: String,
-    raw_value: String,
     single_line: bool,
+    placeholder: &'static str,
     cur_epoch: u64,
-    ctx: EditorDocContext,
+    category: usize,
+    template_key: Rc<str>,
+    doc: Rc<TemplateDoc>,
+    tags_bundle: Memo<Rc<TagsBundle>>,
     mut ed: EditorSignals,
 ) -> Element {
-    let friendly = to_friendly_text(&raw_value, &ctx.pairs);
-    let spans = parse_friendly_spans(&friendly, &ctx.labels);
-    let friendly_for_input = friendly.clone();
-    let ctx_input = ctx.clone();
+    let slot_count = doc.slots.len();
+    let last_slot = slot_count.saturating_sub(1);
+    let last_len = doc.slots.last().map_or(0, String::len);
+    let bundle = tags_bundle.read();
+
+    let active_edit_sig = use_memo(move || {
+        ed.editing_slot
+            .read()
+            .filter(|(f, _)| *f == field)
+            .map(|(_, s)| s)
+    });
+    let active_drop_sig = use_memo(move || ed.drop_target.read().filter(|p| p.field == field));
+    let active_sel_sig = use_memo(move || {
+        ed.selected_block
+            .read()
+            .filter(|(f, _)| *f == field)
+            .map(|(_, s)| s)
+    });
+
+    let is_dragging = ed.drag_payload.read().is_some();
+    let active_edit = *active_edit_sig.read();
+    let active_drop = *active_drop_sig.read();
+    let active_sel = *active_sel_sig.read();
+    let total_empty = doc.blocks.is_empty() && doc.slots.iter().all(|s| s.is_empty());
+
+    let tkey_surface_drop = template_key.clone();
 
     rsx! {
-        div { class: "st-ed-group",
-            div { class: "st-ed-head",
-                span { class: "st-ed-label", "{title}" }
-                if !meta_note.is_empty() {
-                    span {
-                        class: if field == EditorField::Subject && raw_value.chars().count() > 55 {
-                            "muted small st-warn-count"
-                        } else {
-                            "muted small"
-                        },
-                        "{meta_note}"
-                    }
-                }
-            }
-            div {
-                class: if single_line {
-                    "st-rich-box single-line st-canvas-text"
-                } else {
-                    "st-rich-box st-canvas-text"
-                },
-                div { class: "st-rich-mirror", "aria-hidden": "true",
-                    for (si, (start, end, tag)) in spans.into_iter().enumerate() {
-                        match tag {
-                            None => rsx! {
-                                span { key: "rt-{cur_epoch}-{si}", class: "st-rich-text", "{&friendly[start..end]}" }
-                            },
-                            Some((label, own)) => rsx! {
-                                span {
-                                    key: "rk-{cur_epoch}-{si}",
-                                    class: if own { "st-rich-token own" } else { "st-rich-token biz" },
-                                    span { class: "st-rich-pad", "[" }
-                                    span { class: "st-rich-lbl", "{label}" }
-                                    span { class: "st-rich-pad", "]" }
-                                }
-                            },
-                        }
-                    }
-                    span { class: "st-rich-pad", "\u{200b}" }
-                }
-                textarea {
-                    key: "ed-ta-{cur_epoch}-{single_line}",
-                    class: if single_line { "st-rich-input single-line" } else { "st-rich-input" },
-                    rows: if single_line { "1" } else { "3" },
-                    aria_label: "{title}",
-                    value: "{friendly}",
-                    onmounted: move |e: MountedEvent| {
-                        let data = e.data();
-                        ed.mounted_inputs.write().insert(field, data.clone());
-                        if *ed.pending_focus.peek() == Some(field) {
-                            ed.pending_focus.set(None);
-                            spawn(async move {
-                                let _ = data.set_focus(true).await;
-                            });
-                        }
-                    },
-                    onfocus: move |_| {
-                        mobile::set_editing(true);
-                        ed.active_field.set(field);
-                    },
-                    onblur: move |_| mobile::set_editing(false),
-                    onkeydown: move |e: KeyboardEvent| {
-                        if single_line && e.key() == Key::Enter {
-                            e.prevent_default();
-                        }
-                    },
-                    oninput: move |e: FormEvent| {
-                        let mut typed = e.value();
-                        if single_line {
-                            typed = typed.replace(['\r', '\n'], " ");
-                        }
-                        let normalized = normalize_block_edit(
-                            &friendly_for_input,
-                            &typed,
-                            &ctx_input.pairs,
-                            &ctx_input.labels,
-                        );
-                        let next_raw = from_friendly_text(&normalized, &ctx_input.pairs);
-                        write_template_field(
-                            ed,
-                            ctx_input.category,
-                            ctx_input.template_key.clone(),
+        div {
+            class: if single_line {
+                if is_dragging { "st-prose-surface single-line dragging" } else { "st-prose-surface single-line" }
+            } else if is_dragging {
+                "st-prose-surface dragging"
+            } else {
+                "st-prose-surface"
+            },
+            ondragover: move |e: DragEvent| {
+                e.prevent_default();
+                let current_in_field = ed.drop_target.peek().is_some_and(|p| p.field == field);
+                if !current_in_field {
+                    set_drop_target(
+                        ed.drop_target,
+                        DropPos {
                             field,
-                            next_raw,
-                        );
-                    },
+                            slot_idx: last_slot,
+                            byte_offset: last_len,
+                        },
+                    );
+                }
+            },
+            ondrop: move |e: DragEvent| {
+                e.prevent_default();
+                e.stop_propagation();
+                apply_drop(
+                    ed,
+                    category,
+                    &tkey_surface_drop,
+                    &tags_bundle.peek().tags,
+                    field,
+                    last_slot,
+                    last_len,
+                );
+            },
+            onclick: move |_| {
+                if ed.drag_payload.peek().is_none() {
+                    begin_slot_edit(ed, field, last_slot);
+                }
+            },
+            for i in 0..slot_count {
+                {
+                    let slot_text = doc.slots[i].as_str();
+                    let slot_len = slot_text.len();
+                    let is_editing = active_edit == Some(i);
+                    let slot_block = doc.blocks.get(i).map(String::as_str);
+
+                    rsx! {
+                        if is_editing {
+                            if single_line {
+                                {
+                                    let ch_w = (slot_text.chars().count() + 3).max(8);
+                                    let text_empty = slot_text.is_empty();
+                                    let tkey_del = template_key.clone();
+                                    let tkey_in = template_key.clone();
+                                    rsx! {
+                                        input {
+                                            key: "slot-in-{cur_epoch}-{category}-{template_key}-subj-{i}",
+                                            class: "st-slot-input",
+                                            r#type: "text",
+                                            style: "width: min(100%, {ch_w}ch);",
+                                            aria_label: "Asunto del correo",
+                                            value: "{slot_text}",
+                                            onmounted: move |e: MountedEvent| {
+                                                ed.mounted_slot.set(Some(((field, i), e.data())));
+                                            },
+                                            onfocus: move |_| {
+                                                mobile::set_editing(true);
+                                                ed.cursor_slot.set((field, i));
+                                                if ed.selected_block.peek().is_some() {
+                                                    ed.selected_block.set(None);
+                                                }
+                                            },
+                                            onblur: move |_| {
+                                                mobile::set_editing(false);
+                                                if *ed.editing_slot.peek() == Some((field, i)) {
+                                                    ed.editing_slot.set(None);
+                                                }
+                                            },
+                                            onclick: move |e: MouseEvent| e.stop_propagation(),
+                                            onkeydown: move |e: KeyboardEvent| {
+                                                match e.key() {
+                                                    Key::Enter | Key::Escape => {
+                                                        e.prevent_default();
+                                                        if *ed.editing_slot.peek() == Some((field, i)) {
+                                                            ed.editing_slot.set(None);
+                                                        }
+                                                    }
+                                                    Key::Backspace if text_empty && i > 0 => {
+                                                        e.prevent_default();
+                                                        remove_block(
+                                                            ed,
+                                                            category,
+                                                            &tkey_del,
+                                                            &tags_bundle.peek().tags,
+                                                            field,
+                                                            i - 1,
+                                                            true,
+                                                        );
+                                                    }
+                                                    _ => {}
+                                                }
+                                            },
+                                            oninput: move |e: FormEvent| {
+                                                let typed = e.value().replace(['\r', '\n'], " ");
+                                                let tb = tags_bundle.peek();
+                                                let mut next_doc = current_field_doc(&ed.tpl, category, &tkey_in, field, &tb.tags);
+                                                if i < next_doc.slots.len() {
+                                                    next_doc.slots[i] = typed;
+                                                    if let Some(landed) = next_doc.expand_inline_tokens(i, &tb.pairs, &tb.tags) {
+                                                        ed.cursor_slot.set((field, landed));
+                                                        ed.editing_slot.set(Some((field, landed)));
+                                                        ed.pending_focus.set(Some((field, landed)));
+                                                    }
+                                                    write_template_field(ed, category, &tkey_in, field, next_doc.to_raw());
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            } else {
+                                {
+                                    let chars = slot_text.chars().count();
+                                    let newlines = slot_text.matches('\n').count();
+                                    let wide = newlines > 0 || chars > 30;
+                                    let rows = if !wide { 1 } else { ((chars / 56) + newlines + 1).clamp(2, 9) };
+                                    let area_style = if wide {
+                                        "display:block;width:100%;margin:4px 0;".to_owned()
+                                    } else {
+                                        format!("display:inline-block;width:min(100%, {}ch);vertical-align:middle;", (chars + 3).max(8))
+                                    };
+                                    let text_empty = slot_text.is_empty();
+                                    let tkey_del = template_key.clone();
+                                    let tkey_in = template_key.clone();
+                                    rsx! {
+                                        textarea {
+                                            key: "slot-ta-{cur_epoch}-{category}-{template_key}-body-{i}",
+                                            class: "st-slot-area",
+                                            rows: "{rows}",
+                                            style: "{area_style}",
+                                            aria_label: "Texto del mensaje",
+                                            value: "{slot_text}",
+                                            onmounted: move |e: MountedEvent| {
+                                                ed.mounted_slot.set(Some(((field, i), e.data())));
+                                            },
+                                            onfocus: move |_| {
+                                                mobile::set_editing(true);
+                                                ed.cursor_slot.set((field, i));
+                                                if ed.selected_block.peek().is_some() {
+                                                    ed.selected_block.set(None);
+                                                }
+                                            },
+                                            onblur: move |_| {
+                                                mobile::set_editing(false);
+                                                if *ed.editing_slot.peek() == Some((field, i)) {
+                                                    ed.editing_slot.set(None);
+                                                }
+                                            },
+                                            onclick: move |e: MouseEvent| e.stop_propagation(),
+                                            onkeydown: move |e: KeyboardEvent| {
+                                                match e.key() {
+                                                    Key::Escape => {
+                                                        e.prevent_default();
+                                                        if *ed.editing_slot.peek() == Some((field, i)) {
+                                                            ed.editing_slot.set(None);
+                                                        }
+                                                    }
+                                                    Key::Backspace if text_empty && i > 0 => {
+                                                        e.prevent_default();
+                                                        remove_block(
+                                                            ed,
+                                                            category,
+                                                            &tkey_del,
+                                                            &tags_bundle.peek().tags,
+                                                            field,
+                                                            i - 1,
+                                                            true,
+                                                        );
+                                                    }
+                                                    _ => {}
+                                                }
+                                            },
+                                            oninput: move |e: FormEvent| {
+                                                let typed = e.value();
+                                                let tb = tags_bundle.peek();
+                                                let mut next_doc = current_field_doc(&ed.tpl, category, &tkey_in, field, &tb.tags);
+                                                if i < next_doc.slots.len() {
+                                                    next_doc.slots[i] = typed;
+                                                    if let Some(landed) = next_doc.expand_inline_tokens(i, &tb.pairs, &tb.tags) {
+                                                        ed.cursor_slot.set((field, landed));
+                                                        ed.editing_slot.set(Some((field, landed)));
+                                                        ed.pending_focus.set(Some((field, landed)));
+                                                    }
+                                                    write_template_field(ed, category, &tkey_in, field, next_doc.to_raw());
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        } else if slot_text.is_empty() {
+                            if is_dragging {
+                                span {
+                                    key: "dz-empty-{i}",
+                                    class: "st-drop-gap",
+                                    ondragover: move |e: DragEvent| {
+                                        e.prevent_default();
+                                        e.stop_propagation();
+                                        set_drop_target(ed.drop_target, DropPos { field, slot_idx: i, byte_offset: 0 });
+                                    },
+                                    if active_drop == Some(DropPos { field, slot_idx: i, byte_offset: 0 }) {
+                                        span { class: "st-drop-caret" }
+                                    }
+                                }
+                            } else if i == 0 && total_empty {
+                                span {
+                                    key: "empty-hint-{i}",
+                                    class: "st-empty-hint",
+                                    onclick: move |e: MouseEvent| {
+                                        e.stop_propagation();
+                                        begin_slot_edit(ed, field, 0);
+                                    },
+                                    "{placeholder}"
+                                }
+                            } else if i > 0 && slot_block.is_some() {
+                                span {
+                                    key: "gap-click-{i}",
+                                    class: "st-slot-gap",
+                                    title: "Haz clic para escribir aquí",
+                                    onclick: move |e: MouseEvent| {
+                                        e.stop_propagation();
+                                        begin_slot_edit(ed, field, i);
+                                    },
+                                }
+                            }
+                        } else {
+                            for (line_idx, (line_start, line_str)) in split_lines_with_offsets(slot_text).into_iter().enumerate() {
+                                if line_idx > 0 {
+                                    br { key: "br-{i}-{line_idx}" }
+                                }
+                                if line_str.is_empty() {
+                                    if is_dragging {
+                                        span {
+                                            key: "dz-line-{i}-{line_idx}",
+                                            class: "st-drop-gap",
+                                            ondragover: move |e: DragEvent| {
+                                                e.prevent_default();
+                                                e.stop_propagation();
+                                                set_drop_target(ed.drop_target, DropPos { field, slot_idx: i, byte_offset: line_start });
+                                            },
+                                            if active_drop == Some(DropPos { field, slot_idx: i, byte_offset: line_start }) {
+                                                span { class: "st-drop-caret" }
+                                            }
+                                        }
+                                    }
+                                } else if !is_dragging {
+                                    span {
+                                        key: "pr-{i}-{line_idx}",
+                                        class: "st-prose-run",
+                                        onclick: move |e: MouseEvent| {
+                                            e.stop_propagation();
+                                            begin_slot_edit(ed, field, i);
+                                        },
+                                        "{line_str}"
+                                    }
+                                } else {
+                                    span {
+                                        key: "dz-pre-{i}-{line_idx}",
+                                        class: "st-drop-pre",
+                                        ondragover: move |e: DragEvent| {
+                                            e.prevent_default();
+                                            e.stop_propagation();
+                                            set_drop_target(ed.drop_target, DropPos { field, slot_idx: i, byte_offset: line_start });
+                                        },
+                                        if active_drop == Some(DropPos { field, slot_idx: i, byte_offset: line_start }) {
+                                            span { class: "st-drop-caret" }
+                                        }
+                                    }
+                                    for (pi, (_w_start, w_end, piece)) in split_word_pieces(line_str, line_start).into_iter().enumerate() {
+                                        span {
+                                            key: "wp-{i}-{line_idx}-{pi}",
+                                            class: "st-drop-word",
+                                            ondragover: move |e: DragEvent| {
+                                                e.prevent_default();
+                                                e.stop_propagation();
+                                                set_drop_target(ed.drop_target, DropPos { field, slot_idx: i, byte_offset: w_end });
+                                            },
+                                            "{piece}"
+                                        }
+                                        if active_drop == Some(DropPos { field, slot_idx: i, byte_offset: w_end }) {
+                                            span { key: "dc-{i}-{line_idx}-{pi}", class: "st-drop-caret" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(key) = slot_block {
+                            if let Some(tag) = bundle.tags.get(key) {
+                                {
+                                    let is_selected = active_sel == Some(i);
+                                    let tkey_drop = template_key.clone();
+                                    let tkey_key = template_key.clone();
+                                    let tkey_del = template_key.clone();
+                                    let hover_key = tag.key.clone();
+                                    let leave_key = tag.key.clone();
+                                    let drag_key = tag.key.clone();
+                                    let click_key = tag.key.clone();
+                                    let drag_label = tag.label.clone();
+                                    rsx! {
+                                        span {
+                                            key: "pill-{cur_epoch}-{field:?}-{i}-{tag.key}",
+                                            class: if tag.own {
+                                                if is_selected { "st-token-pill own selected" } else { "st-token-pill own" }
+                                            } else if is_selected {
+                                                "st-token-pill biz selected"
+                                            } else {
+                                                "st-token-pill biz"
+                                            },
+                                            draggable: "true",
+                                            tabindex: "0",
+                                            title: "Bloque: {tag.label} — {tag.description}",
+                                            onmouseenter: move |_| set_hovered_tag(ed.hovered_tag, &hover_key),
+                                            onmouseleave: move |_| clear_hovered_tag(ed.hovered_tag, &leave_key),
+                                            ondragstart: move |e: DragEvent| {
+                                                e.data_transfer().set_effect_allowed("move");
+                                                let _ = e.data_transfer().set_data("text/plain", &drag_label);
+                                                ed.editing_slot.set(None);
+                                                ed.selected_block.set(None);
+                                                ed.drag_payload.set(Some(DragPayload::MoveBlock {
+                                                    field,
+                                                    block_idx: i,
+                                                    key: drag_key.clone(),
+                                                }));
+                                            },
+                                            ondragend: move |_| {
+                                                ed.drag_payload.set(None);
+                                                ed.drop_target.set(None);
+                                            },
+                                            ondragover: move |e: DragEvent| {
+                                                e.prevent_default();
+                                                e.stop_propagation();
+                                                set_drop_target(ed.drop_target, DropPos {
+                                                    field,
+                                                    slot_idx: i,
+                                                    byte_offset: slot_len,
+                                                });
+                                            },
+                                            ondrop: move |e: DragEvent| {
+                                                e.prevent_default();
+                                                e.stop_propagation();
+                                                apply_drop(
+                                                    ed,
+                                                    category,
+                                                    &tkey_drop,
+                                                    &tags_bundle.peek().tags,
+                                                    field,
+                                                    i,
+                                                    slot_len,
+                                                );
+                                            },
+                                            onclick: move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                ed.editing_slot.set(None);
+                                                ed.selected_block.set(Some((field, i)));
+                                                set_hovered_tag(ed.hovered_tag, &click_key);
+                                            },
+                                            onkeydown: move |e: KeyboardEvent| {
+                                                match e.key() {
+                                                    Key::Backspace | Key::Delete => {
+                                                        e.prevent_default();
+                                                        remove_block(
+                                                            ed,
+                                                            category,
+                                                            &tkey_key,
+                                                            &tags_bundle.peek().tags,
+                                                            field,
+                                                            i,
+                                                            false,
+                                                        );
+                                                    }
+                                                    Key::ArrowLeft | Key::ArrowRight => {
+                                                        e.prevent_default();
+                                                        let tb = tags_bundle.peek();
+                                                        let mut next_doc = current_field_doc(&ed.tpl, category, &tkey_key, field, &tb.tags);
+                                                        let moved_to = next_doc.nudge_block(i, e.key() == Key::ArrowRight);
+                                                        ed.selected_block.set(Some((field, moved_to)));
+                                                        write_template_field(ed, category, &tkey_key, field, next_doc.to_raw());
+                                                    }
+                                                    Key::Escape => {
+                                                        ed.selected_block.set(None);
+                                                    }
+                                                    _ => {}
+                                                }
+                                            },
+                                            span { class: "st-pill-text", "{tag.sample}" }
+                                            button {
+                                                class: "st-pill-del",
+                                                r#type: "button",
+                                                draggable: "false",
+                                                aria_label: "Quitar bloque {tag.label}",
+                                                title: "Quitar {tag.label}",
+                                                onclick: move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    remove_block(
+                                                        ed,
+                                                        category,
+                                                        &tkey_del,
+                                                        &tags_bundle.peek().tags,
+                                                        field,
+                                                        i,
+                                                        false,
+                                                    );
+                                                },
+                                                "×"
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                span { key: "raw-blk-{i}", class: "st-prose-run", "{{{key}}}" }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1072,7 +1818,7 @@ fn BlockCanvasField(
 }
 
 #[component]
-pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element {
+pub(super) fn TemplateCanvas(tpl: DraftState, settings: Signal<Settings>) -> Element {
     let home = consume_context::<Services>().db.paths.home;
     let mut ui = use_context::<UiState>();
     let mut category = use_signal(|| 0usize);
@@ -1083,24 +1829,43 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
     let new_label = use_signal(String::new);
     let new_value = use_signal(String::new);
 
-    let active_field = use_signal(|| EditorField::Body);
+    let cursor_slot = use_signal(|| (EditorField::Body, 0usize));
+    let editing_slot = use_signal(|| None::<(EditorField, usize)>);
+    let mut pending_focus = use_signal(|| None::<(EditorField, usize)>);
+    let mounted_slot = use_signal(|| None::<((EditorField, usize), Rc<MountedData>)>);
+    let selected_block = use_signal(|| None::<(EditorField, usize)>);
     let hovered_tag = use_signal(|| None::<String>);
-    let mut mounted_inputs = use_signal(BTreeMap::<EditorField, Rc<MountedData>>::new);
-    let mut pending_focus = use_signal(|| None::<EditorField>);
+    let drag_payload = use_signal(|| None::<DragPayload>);
+    let drop_target = use_signal(|| None::<DropPos>);
+
+    let profile_vars = use_memo(move || ProfileVars::from_settings(&settings.read()));
+    let datos_memo = use_memo(move || {
+        tpl.parsed
+            .read()
+            .as_ref()
+            .map(|t| t.datos.clone())
+            .unwrap_or_default()
+    });
+    let tags_bundle =
+        use_memo(move || Rc::new(build_tags_bundle(&profile_vars.read(), &datos_memo.read())));
+    let datos_keys = use_memo(move || datos_memo.read().keys().cloned().collect::<Vec<String>>());
 
     use_effect(move || {
         let Some(target) = *pending_focus.read() else {
             return;
         };
-        if let Some(el) = mounted_inputs.peek().get(&target).cloned() {
+        if let Some((slot_key, data)) = mounted_slot.read().as_ref().cloned()
+            && slot_key == target
+        {
             pending_focus.set(None);
             spawn(async move {
-                let _ = el.set_focus(true).await;
+                let _ = data.set_focus(true).await;
             });
         }
     });
 
-    let Ok(t) = Templates::parse_toml(&tpl.read()) else {
+    let parsed_guard = tpl.parsed.read();
+    let Some(t) = parsed_guard.as_ref() else {
         return rsx! {
             section { class: "panel st-tpl",
                 div { class: "panel-heading",
@@ -1128,8 +1893,9 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
         };
     };
 
+    let bundle = tags_bundle.read();
     let cat = (*category.read()).min(CATEGORIES.len() - 1);
-    let list = items(&t, cat, &settings);
+    let list = items_with_tags(t, cat, &bundle.tags);
     let index = picks.read()[cat].min(list.len().saturating_sub(1));
     let current = list.get(index).cloned().unwrap_or(Item {
         key: String::new(),
@@ -1140,65 +1906,71 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
     });
     let is_email = cat == 1;
     let is_giro = cat == 3;
-    let body_raw = if is_giro {
-        String::new()
-    } else {
-        text_of(&t, cat, &current.key)
-    };
-    let subject_raw = if is_email {
-        email_subject_of(&t, &current.key)
-    } else {
-        String::new()
-    };
-    let removable = !is_giro && !REQUIRED.contains(&current.key.as_str());
     let cur_epoch = *epoch.read();
-    let giro = t.giros.get(&current.key).cloned().unwrap_or_default();
-
-    let (preview_subject, preview_body) = match cat {
-        1 => (
-            Some(resolve_preview_parts(&subject_raw, &settings, &t, None)),
-            resolve_preview_parts(&body_raw, &settings, &t, None),
-        ),
-        3 => (
-            None,
-            resolve_preview_parts(&text_of(&t, 0, "A"), &settings, &t, Some(&giro)),
-        ),
-        _ => (None, resolve_preview_parts(&body_raw, &settings, &t, None)),
+    let template_key: Rc<str> = Rc::from(current.key.as_str());
+    let giro = if is_giro {
+        t.giros.get(&current.key).cloned().unwrap_or_default()
+    } else {
+        BTreeMap::new()
     };
-    let preview_subject_len = preview_subject
-        .as_deref()
-        .map(preview_char_len)
-        .unwrap_or(0);
 
-    let all_tags = palette_tags(&t, &settings);
-    let biz_tags: Vec<ResolvedTag> = all_tags.iter().filter(|tag| !tag.own).cloned().collect();
-    let own_tags: Vec<ResolvedTag> = all_tags.iter().filter(|tag| tag.own).cloned().collect();
-    let tag_map: BTreeMap<String, ResolvedTag> = all_tags
-        .iter()
-        .map(|tag| (tag.key.clone(), tag.clone()))
-        .collect();
-    let pairs = tag_pairs(&t.datos);
-    let labels = labels_ownership_map(&all_tags);
+    let (body_doc, subj_doc, words, subj_len, giro_sample) = if is_giro {
+        let sample = plain_sample_text(&resolve_preview_parts(
+            &text_of(t, 0, "A"),
+            &settings.peek(),
+            t,
+            Some(&giro),
+        ));
+        (
+            Rc::new(TemplateDoc {
+                slots: vec![String::new()],
+                blocks: Vec::new(),
+            }),
+            None,
+            0usize,
+            0usize,
+            sample,
+        )
+    } else {
+        let body_raw = text_of(t, cat, &current.key);
+        let b_doc = Rc::new(TemplateDoc::parse(&body_raw, &bundle.tags));
+        let w = count_doc_words(&b_doc, &bundle.tags);
+        if is_email {
+            let subject_raw = email_subject_of(t, &current.key);
+            let s_doc = Rc::new(TemplateDoc::parse(&subject_raw, &bundle.tags));
+            let s_len = count_doc_chars(&s_doc, &bundle.tags);
+            (b_doc, Some(s_doc), w, s_len, String::new())
+        } else {
+            (b_doc, None, w, 0, String::new())
+        }
+    };
 
-    let duplicate_key = new_key(&t, cat, &current.key);
+    let body_raw_copy = if is_giro {
+        String::new()
+    } else {
+        text_of(t, cat, &current.key)
+    };
+    let subject_raw_copy = if is_email {
+        email_subject_of(t, &current.key)
+    } else {
+        String::new()
+    };
+    let body_slots_len = body_doc.slots.len();
+    let removable = !is_giro && !REQUIRED.contains(&current.key.as_str());
+    let duplicate_key = new_key(t, cat, &current.key);
     let total = list.len();
 
     let ed = EditorSignals {
         tpl,
         error,
-        active_field,
-        hovered_tag,
-        mounted_inputs,
+        cursor_slot,
+        editing_slot,
         pending_focus,
-    };
-    let doc_ctx = EditorDocContext {
-        category: cat,
-        template_key: current.key.clone(),
-        subject_raw: subject_raw.clone(),
-        body_raw: body_raw.clone(),
-        pairs,
-        labels,
-        tags: tag_map,
+        mounted_slot,
+        selected_block,
+        hovered_tag,
+        drag_payload,
+        drop_target,
     };
 
     rsx! {
@@ -1219,8 +1991,7 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
                             onclick: move |_| {
                                 category.set(i);
                                 adding.set(false);
-                                pending_focus.set(None);
-                                mounted_inputs.write().clear();
+                                clear_editor_interaction(ed, body_slots_len);
                                 epoch += 1;
                             },
                             "{name}"
@@ -1235,8 +2006,8 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
                     index,
                     list,
                     picks,
-                    pending_focus,
-                    mounted_inputs,
+                    ed,
+                    body_slots_len,
                     epoch,
                 }
                 div { class: "st-canvas",
@@ -1256,8 +2027,8 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
                                 cat,
                                 is_email,
                                 current_key: current.key.clone(),
-                                body_raw: body_raw.clone(),
-                                subject_raw: subject_raw.clone(),
+                                body_raw: body_raw_copy,
+                                subject_raw: subject_raw_copy,
                                 total,
                                 index,
                                 duplicate_available: duplicate_key.is_some(),
@@ -1265,7 +2036,8 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
                                 tpl,
                                 error,
                                 picks,
-                                mounted_inputs,
+                                ed,
+                                body_slots_len,
                                 epoch,
                             }
                         }
@@ -1275,40 +2047,31 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
                         PalettePanel {
                             is_email,
                             cur_epoch,
-                            biz_tags,
-                            own_tags,
-                            doc_ctx: doc_ctx.clone(),
+                            category: cat,
+                            template_key: template_key.clone(),
+                            tags_bundle,
+                            datos_keys,
                             ed,
                             adding,
                             new_label,
                             new_value,
-                            templates_ref: t,
                         }
                     }
 
-                    div { class: "st-split-work",
-                        div { class: "st-split-ed",
-                            TemplateEditorPane {
-                                cat,
-                                is_giro,
-                                is_email,
-                                cur_epoch,
-                                current_key: current.key.clone(),
-                                giro,
-                                doc_ctx,
-                                ed,
-                                subject_raw,
-                                body_raw,
-                                preview_subject_len,
-                            }
-                        }
-                        div { class: "st-split-prev",
-                            PreviewCard {
-                                is_giro,
-                                preview_subject,
-                                preview_body,
-                            }
-                        }
+                    UnifiedComposer {
+                        cat,
+                        is_giro,
+                        is_email,
+                        cur_epoch,
+                        template_key,
+                        giro,
+                        body_doc,
+                        subj_doc,
+                        words,
+                        subj_len,
+                        giro_sample,
+                        tags_bundle,
+                        ed,
                     }
                     if !error.read().is_empty() {
                         p { class: "error small", role: "alert", "{error}" }
@@ -1320,68 +2083,147 @@ pub(super) fn TemplateCanvas(tpl: Signal<String>, settings: Settings) -> Element
 }
 
 #[component]
-fn TemplateEditorPane(
+fn UnifiedComposer(
     cat: usize,
     is_giro: bool,
     is_email: bool,
     cur_epoch: u64,
-    current_key: String,
+    template_key: Rc<str>,
     giro: BTreeMap<String, String>,
-    doc_ctx: EditorDocContext,
+    body_doc: Rc<TemplateDoc>,
+    subj_doc: Option<Rc<TemplateDoc>>,
+    words: usize,
+    subj_len: usize,
+    giro_sample: String,
+    tags_bundle: Memo<Rc<TagsBundle>>,
     ed: EditorSignals,
-    subject_raw: String,
-    body_raw: String,
-    preview_subject_len: usize,
 ) -> Element {
+    let maybe_ui = try_use_context::<UiState>();
+
     if is_giro {
         return rsx! {
             GiroFields {
                 cur_epoch,
-                current_key,
+                current_key: template_key.to_string(),
                 giro,
+                sample_body: giro_sample,
                 tpl: ed.tpl,
                 error: ed.error,
             }
         };
     }
 
-    let subject_note = format!("{preview_subject_len}/60 caracteres aprox.");
-    let body_title: &'static str = if is_email {
-        "Mensaje del correo"
-    } else {
-        "Mensaje"
-    };
-    let body_note: String = if is_email {
-        "Máx. 120 palabras · incluye firma · Enter separa párrafos.".to_owned()
+    let max_words = if is_email {
+        120
     } else if cat == 0 {
-        "Máx. 65 palabras y 1 pregunta · sin enlaces.".to_owned()
+        65
     } else {
-        "Máx. 80 palabras · deja una línea en blanco entre párrafos.".to_owned()
+        80
     };
+    let copy_key = template_key.clone();
 
-    rsx! {
-        div { class: "st-editor-stack",
-            if is_email {
-                BlockCanvasField {
-                    field: EditorField::Subject,
-                    title: "Asunto del correo",
-                    meta_note: subject_note,
-                    raw_value: subject_raw,
-                    single_line: true,
-                    cur_epoch,
-                    ctx: doc_ctx.clone(),
-                    ed,
+    if is_email {
+        let s_doc = subj_doc.unwrap_or_else(|| {
+            Rc::new(TemplateDoc {
+                slots: vec![String::new()],
+                blocks: Vec::new(),
+            })
+        });
+        return rsx! {
+            div { class: "st-unified-card st-mail",
+                div { class: "st-mail-subject-row",
+                    span { class: "st-mail-subj-label muted", "Asunto" }
+                    UnifiedFieldSurface {
+                        key: "uf-subj-{cat}-{cur_epoch}",
+                        field: EditorField::Subject,
+                        single_line: true,
+                        placeholder: "Escribe el asunto o arrastra un bloque…",
+                        cur_epoch,
+                        category: cat,
+                        template_key: template_key.clone(),
+                        doc: s_doc,
+                        tags_bundle,
+                        ed,
+                    }
+                    span {
+                        class: if subj_len > 55 { "muted small st-warn-count" } else { "muted small st-count" },
+                        "{subj_len}/60"
+                    }
+                }
+                div { class: "st-mail-body",
+                    UnifiedFieldSurface {
+                        key: "uf-body-{cat}-{cur_epoch}",
+                        field: EditorField::Body,
+                        single_line: false,
+                        placeholder: "Haz clic para escribir o arrastra un bloque…",
+                        cur_epoch,
+                        category: cat,
+                        template_key,
+                        doc: body_doc,
+                        tags_bundle,
+                        ed,
+                    }
+                }
+                div { class: "st-card-foot",
+                    span {
+                        class: if words > max_words { "muted small st-warn-count" } else { "muted small" },
+                        "{words} / {max_words} palabras"
+                    }
+                    if let Some(ui) = maybe_ui {
+                        button {
+                            class: "link-button small",
+                            r#type: "button",
+                            onclick: move |_| {
+                                let tb = tags_bundle.peek();
+                                let s = current_field_doc(&ed.tpl, cat, &copy_key, EditorField::Subject, &tb.tags);
+                                let b = current_field_doc(&ed.tpl, cat, &copy_key, EditorField::Body, &tb.tags);
+                                let payload = format!(
+                                    "Asunto: {}\n\n{}",
+                                    doc_to_sample_string(&s, &tb.tags),
+                                    doc_to_sample_string(&b, &tb.tags),
+                                );
+                                super::super::copied(&payload, ui);
+                            },
+                            "Copiar ejemplo"
+                        }
+                    }
                 }
             }
-            BlockCanvasField {
+        };
+    }
+
+    rsx! {
+        div { class: "st-unified-card st-bubble",
+            UnifiedFieldSurface {
+                key: "uf-body-{cat}-{cur_epoch}",
                 field: EditorField::Body,
-                title: body_title,
-                meta_note: body_note,
-                raw_value: body_raw,
                 single_line: false,
+                placeholder: "Haz clic para escribir o arrastra un bloque…",
                 cur_epoch,
-                ctx: doc_ctx,
+                category: cat,
+                template_key,
+                doc: body_doc,
+                tags_bundle,
                 ed,
+            }
+            div { class: "st-card-foot",
+                span {
+                    class: if words > max_words { "muted small st-warn-count" } else { "muted small" },
+                    "{words} / {max_words} palabras"
+                }
+                if let Some(ui) = maybe_ui {
+                    button {
+                        class: "link-button small",
+                        r#type: "button",
+                        onclick: move |_| {
+                            let tb = tags_bundle.peek();
+                            let b = current_field_doc(&ed.tpl, cat, &copy_key, EditorField::Body, &tb.tags);
+                            let payload = doc_to_sample_string(&b, &tb.tags);
+                            super::super::copied(&payload, ui);
+                        },
+                        "Copiar ejemplo"
+                    }
+                }
             }
         }
     }
@@ -1393,8 +2235,8 @@ fn TemplateVariantList(
     index: usize,
     list: Vec<Item>,
     mut picks: Signal<[usize; 4]>,
-    mut pending_focus: Signal<Option<EditorField>>,
-    mut mounted_inputs: Signal<BTreeMap<EditorField, Rc<MountedData>>>,
+    ed: EditorSignals,
+    body_slots_len: usize,
     mut epoch: Signal<u64>,
 ) -> Element {
     rsx! {
@@ -1408,8 +2250,7 @@ fn TemplateVariantList(
                         aria_current: i == index,
                         onclick: move |_| {
                             picks.write()[cat] = i;
-                            pending_focus.set(None);
-                            mounted_inputs.write().clear();
+                            clear_editor_interaction(ed, body_slots_len);
                             epoch += 1;
                         },
                         div { class: "st-tpl-item-top",
@@ -1439,10 +2280,11 @@ fn TemplateVariantActions(
     index: usize,
     duplicate_available: bool,
     removable: bool,
-    tpl: Signal<String>,
+    tpl: DraftState,
     error: Signal<String>,
     mut picks: Signal<[usize; 4]>,
-    mut mounted_inputs: Signal<BTreeMap<EditorField, Rc<MountedData>>>,
+    ed: EditorSignals,
+    body_slots_len: usize,
     mut epoch: Signal<u64>,
 ) -> Element {
     let dup_key = current_key.clone();
@@ -1454,8 +2296,9 @@ fn TemplateVariantActions(
                 disabled: !duplicate_available,
                 title: "Crea una plantilla nueva a partir de esta",
                 onclick: move |_| {
-                    let Some(key) = Templates::parse_toml(&tpl.peek())
-                        .ok()
+                    let cached = tpl.parsed.peek().clone();
+                    let Some(key) = cached
+                        .or_else(|| Templates::parse_toml(&tpl.source.peek()).ok())
                         .and_then(|fresh| new_key(&fresh, cat, &dup_key))
                     else {
                         return;
@@ -1469,14 +2312,15 @@ fn TemplateVariantActions(
                         }
                         section(t, cat).insert(key, text);
                     });
-                    if let Ok(fresh) = Templates::parse_toml(&tpl.peek()) {
-                        let position = items(&fresh, cat, &Settings::default())
+                    if let Some(fresh) = tpl.parsed.peek().as_ref() {
+                        let empty_tags = BTreeMap::new();
+                        let position = items_with_tags(fresh, cat, &empty_tags)
                             .iter()
                             .position(|item| item.key == created)
                             .unwrap_or(total);
                         picks.write()[cat] = position;
                     }
-                    mounted_inputs.write().clear();
+                    clear_editor_interaction(ed, body_slots_len);
                     epoch += 1;
                 },
                 svg {
@@ -1510,7 +2354,7 @@ fn TemplateVariantActions(
                         section(t, cat).remove(&rm_key);
                     });
                     picks.write()[cat] = index.saturating_sub(1);
-                    mounted_inputs.write().clear();
+                    clear_editor_interaction(ed, body_slots_len);
                     epoch += 1;
                 },
                 "Eliminar"
@@ -1524,20 +2368,12 @@ fn GiroFields(
     cur_epoch: u64,
     current_key: String,
     giro: BTreeMap<String, String>,
-    tpl: Signal<String>,
+    sample_body: String,
+    tpl: DraftState,
     error: Signal<String>,
 ) -> Element {
     rsx! {
         div { key: "giro-{current_key}-{cur_epoch}", class: "st-giro",
-            p { class: "muted small",
-                "Estos tres campos llenan automáticamente los bloques "
-                super::InlineTag { label: "Proceso clave", own: false }
-                ", "
-                super::InlineTag { label: "Pregunta", own: false }
-                " y "
-                super::InlineTag { label: "Ejemplo de mejora", own: false }
-                " cuando la empresa pertenece a este giro."
-            }
             for (field, title, rows) in [
                 ("cosa", "Proceso clave", 1usize),
                 ("pregunta", "Pregunta", 2),
@@ -1564,6 +2400,34 @@ fn GiroFields(
                     }
                 }
             }
+            div { class: "st-giro-sample",
+                span { class: "muted small", "Muestra en WhatsApp:" }
+                p { class: "small", "{sample_body}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn PaletteInfoBar(
+    hovered_tag: Signal<Option<String>>,
+    tags_bundle: Memo<Rc<TagsBundle>>,
+) -> Element {
+    let key_guard = hovered_tag.read();
+    let bundle = tags_bundle.read();
+    let inspected_tag = key_guard.as_deref().and_then(|key| bundle.tags.get(key));
+
+    rsx! {
+        div { class: "st-chip-info",
+            if let Some(info) = inspected_tag {
+                strong { "{info.label}" }
+                span { class: "muted", " — {info.description} " }
+                span { class: "st-chip-sample", "Ej: «{info.sample}»" }
+            } else {
+                span { class: "muted",
+                    "Clic para añadir · arrastra en el mensaje para mover · pasa el cursor sobre un bloque para ver cuál es."
+                }
+            }
         }
     }
 }
@@ -1572,34 +2436,36 @@ fn GiroFields(
 fn PalettePanel(
     is_email: bool,
     cur_epoch: u64,
-    biz_tags: Vec<ResolvedTag>,
-    own_tags: Vec<ResolvedTag>,
-    doc_ctx: EditorDocContext,
+    category: usize,
+    template_key: Rc<str>,
+    tags_bundle: Memo<Rc<TagsBundle>>,
+    datos_keys: Memo<Vec<String>>,
     mut ed: EditorSignals,
     mut adding: Signal<bool>,
     mut new_label: Signal<String>,
     mut new_value: Signal<String>,
-    templates_ref: Templates,
 ) -> Element {
-    let inspected_tag = ed
-        .hovered_tag
-        .read()
-        .as_deref()
-        .and_then(|key| doc_ctx.tags.get(key))
-        .cloned();
-    let label_draft = new_label.read().clone();
-    let datum_error = if label_draft.trim().is_empty() {
-        None
+    let bundle = tags_bundle.read();
+    let existing_keys = datos_keys.read();
+    let is_adding = *adding.read();
+    let (label_draft, datum_error) = if is_adding {
+        let draft = new_label.read().clone();
+        let err = if draft.trim().is_empty() {
+            None
+        } else {
+            new_datum_error_in_keys(existing_keys.iter(), draft.trim())
+        };
+        (draft, err)
     } else {
-        new_datum_error(&templates_ref, label_draft.trim())
+        (String::new(), None)
     };
 
     rsx! {
         div { class: "st-palette",
             div { class: "st-palette-groups",
                 for (group_title, is_own_group, group_tags) in [
-                    ("Sobre la empresa", false, biz_tags),
-                    ("Tus datos (Perfil)", true, own_tags),
+                    ("Empresa", false, bundle.biz_tags.as_slice()),
+                    ("Tu perfil", true, bundle.own_tags.as_slice()),
                 ] {
                     div { class: "st-chip-group", key: "grp-{group_title}",
                         span { class: "st-chips-label", "{group_title}" }
@@ -1607,44 +2473,62 @@ fn PalettePanel(
                             for tag in group_tags {
                                 {
                                     let tag_key_hover = tag.key.clone();
+                                    let tag_key_leave = tag.key.clone();
                                     let tag_key_focus = tag.key.clone();
-                                    let drag_friendly = format!("[{}]", tag.label);
-                                    let click_label = tag.label.clone();
-                                    let ctx_click = doc_ctx.clone();
+                                    let tag_key_drag = tag.key.clone();
+                                    let tag_key_click = tag.key.clone();
+                                    let drag_label = tag.label.clone();
+                                    let tkey_click = template_key.clone();
                                     rsx! {
                                         button {
                                             key: "chip-{tag.key}",
                                             class: if tag.own { "st-chip own" } else { "st-chip biz" },
                                             r#type: "button",
                                             draggable: "true",
-                                            title: "{tag.description} Ejemplo: «{tag.sample}»",
-                                            onmouseenter: move |_| ed.hovered_tag.set(Some(tag_key_hover.clone())),
-                                            onfocus: move |_| ed.hovered_tag.set(Some(tag_key_focus.clone())),
+                                            title: "{tag.description} Ej: «{tag.sample}»",
+                                            onmouseenter: move |_| set_hovered_tag(ed.hovered_tag, &tag_key_hover),
+                                            onmouseleave: move |_| clear_hovered_tag(ed.hovered_tag, &tag_key_leave),
+                                            onfocus: move |_| set_hovered_tag(ed.hovered_tag, &tag_key_focus),
                                             ondragstart: move |e: DragEvent| {
                                                 e.data_transfer().set_effect_allowed("copy");
-                                                let _ = e.data_transfer().set_data("text/plain", &drag_friendly);
+                                                let _ = e.data_transfer().set_data("text/plain", &drag_label);
+                                                ed.drag_payload.set(Some(DragPayload::AddKey(tag_key_drag.clone())));
+                                            },
+                                            ondragend: move |_| {
+                                                ed.drag_payload.set(None);
+                                                ed.drop_target.set(None);
                                             },
                                             onclick: move |_| {
-                                                let mut target_field = *ed.active_field.peek();
-                                                if !is_email {
-                                                    target_field = EditorField::Body;
-                                                }
-                                                let src = if target_field == EditorField::Subject {
-                                                    &ctx_click.subject_raw
+                                                let (last_field, last_slot) = *ed.cursor_slot.peek();
+                                                let target_field = if is_email {
+                                                    last_field
                                                 } else {
-                                                    &ctx_click.body_raw
+                                                    EditorField::Body
                                                 };
-                                                let cur_friendly = to_friendly_text(src, &ctx_click.pairs);
-                                                let next_friendly = append_token_spacing(&cur_friendly, &click_label);
-                                                let next_raw = from_friendly_text(&next_friendly, &ctx_click.pairs);
+                                                let tb = tags_bundle.peek();
+                                                let mut doc = current_field_doc(&ed.tpl, category, &tkey_click, target_field, &tb.tags);
+                                                let slot_idx = if target_field == last_field {
+                                                    last_slot.min(doc.slots.len().saturating_sub(1))
+                                                } else {
+                                                    doc.slots.len().saturating_sub(1)
+                                                };
+                                                let byte_end = doc.slots[slot_idx].len();
+                                                let next_slot = doc.insert_block_at(
+                                                    slot_idx,
+                                                    byte_end,
+                                                    tag_key_click.clone(),
+                                                );
+                                                ed.selected_block.set(None);
+                                                ed.cursor_slot.set((target_field, next_slot));
+                                                ed.editing_slot.set(Some((target_field, next_slot)));
+                                                ed.pending_focus.set(Some((target_field, next_slot)));
                                                 write_template_field(
                                                     ed,
-                                                    ctx_click.category,
-                                                    ctx_click.template_key.clone(),
+                                                    category,
+                                                    &tkey_click,
                                                     target_field,
-                                                    next_raw,
+                                                    doc.to_raw(),
                                                 );
-                                                ed.pending_focus.set(Some(target_field));
                                             },
                                             span { class: "st-chip-dot", "aria-hidden": "true" }
                                             "{tag.label}"
@@ -1656,7 +2540,7 @@ fn PalettePanel(
                                 button {
                                     class: "st-chip add",
                                     r#type: "button",
-                                    aria_expanded: *adding.read(),
+                                    aria_expanded: is_adding,
                                     onclick: move |_| {
                                         let open = *adding.peek();
                                         adding.set(!open);
@@ -1668,20 +2552,12 @@ fn PalettePanel(
                     }
                 }
             }
-            div { class: "st-chip-info",
-                if let Some(info) = inspected_tag {
-                    strong { "{info.label}" }
-                    span { class: "muted", " — {info.description} " }
-                    span { class: "st-chip-sample", "Ejemplo: «{info.sample}»" }
-                } else {
-                    span { class: "muted",
-                        strong { "Empresa de ejemplo: " }
-                        "«Taller Industrial del Valle» (manufactura metálica). Haz clic en cualquier bloque para añadirlo o arrástralo dentro del texto; pasa el cursor sobre uno para ver qué texto inserta."
-                    }
-                }
+            PaletteInfoBar {
+                hovered_tag: ed.hovered_tag,
+                tags_bundle,
             }
         }
-        if *adding.read() {
+        if is_adding {
             div { class: "st-newdata",
                 TextEntry {
                     key: "nd-label-{cur_epoch}",
@@ -1716,67 +2592,8 @@ fn PalettePanel(
                 if let Some(message) = datum_error {
                     span { class: "error small", role: "alert", "{message}" }
                 } else {
-                    span { class: "muted small", "Queda guardado en Perfil para usarlo en cualquier plantilla." }
+                    span { class: "muted small", "Queda disponible para todas tus plantillas." }
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn PreviewPartsView(parts: Vec<PreviewPart>) -> Element {
-    rsx! {
-        for (idx, part) in parts.into_iter().enumerate() {
-            match part {
-                PreviewPart::Text(text) => rsx! { span { key: "pt-{idx}", "{text}" } },
-                PreviewPart::Block { label, value, own } => rsx! {
-                    span {
-                        key: "pb-{idx}",
-                        class: if own { "st-prev-token own" } else { "st-prev-token biz" },
-                        title: "Bloque: {label}",
-                        "{value}"
-                    }
-                },
-            }
-        }
-    }
-}
-
-#[component]
-fn PreviewCard(
-    is_giro: bool,
-    preview_subject: Option<Vec<PreviewPart>>,
-    preview_body: Vec<PreviewPart>,
-) -> Element {
-    rsx! {
-        div { class: "st-preview",
-            div { class: "st-preview-head",
-                strong { class: "st-preview-title", "Vista previa en vivo" }
-                span { class: "st-preview-badge",
-                    if is_giro {
-                        "Muestra: WhatsApp base del giro"
-                    } else {
-                        "Muestra: Taller Industrial del Valle"
-                    }
-                }
-            }
-            if let Some(subject) = preview_subject {
-                div { class: "st-mail",
-                    p { class: "st-mail-subject",
-                        span { class: "muted", "Asunto  " }
-                        PreviewPartsView { parts: subject }
-                    }
-                    p { class: "message-preview", PreviewPartsView { parts: preview_body } }
-                }
-            } else {
-                div { class: "st-bubble",
-                    p { class: "message-preview", PreviewPartsView { parts: preview_body } }
-                }
-            }
-            div { class: "st-prev-legend",
-                span { class: "st-prev-token biz", "Dato de la empresa" }
-                span { class: "st-prev-token own", "Dato de tu Perfil" }
-                span { class: "muted", "Pasa el cursor sobre un recuadro para ver su bloque." }
             }
         }
     }
@@ -1786,69 +2603,71 @@ fn PreviewCard(
 mod tests {
     use super::*;
 
-    #[test]
-    fn friendly_tags_roundtrip_and_atomic_block_editing() {
+    fn test_tags() -> BTreeMap<String, ResolvedTag> {
         let bundled = Templates::bundled_source();
-        let mut datos = BTreeMap::new();
-        datos.insert("Mi empresa".to_owned(), "Soluciones del Valle".to_owned());
-        let t = Templates::parse_toml(bundled).unwrap();
+        let mut t = Templates::parse_toml(bundled).unwrap();
+        t.datos
+            .insert("Mi empresa".to_owned(), "Soluciones del Valle".to_owned());
         let settings = Settings {
             owner_name: "Tu nombre".into(),
             ..Settings::default()
         };
-        let tags = palette_tags(&t, &settings);
-        let owner_tag = tags.iter().find(|tag| tag.key == "owner").unwrap();
-        assert_eq!(owner_tag.sample, "Sofía Méndez");
+        palette_tags(&t, &settings)
+            .into_iter()
+            .map(|tag| (tag.key.clone(), tag))
+            .collect()
+    }
 
+    #[test]
+    fn unified_slots_roundtrip_move_insert_delete_and_expand() {
+        let tags = test_tags();
+        assert_eq!(tags["owner"].sample, "Sofía Méndez");
+
+        let raw = "Hola, soy {owner}. Visito a {nombre} por {cosa}.";
+        let doc = TemplateDoc::parse(raw, &tags);
+        assert_eq!(doc.blocks, vec!["owner", "nombre", "cosa"]);
+        assert_eq!(doc.slots, vec!["Hola, soy ", ". Visito a ", " por ", "."]);
+        assert_eq!(doc.to_raw(), raw);
+
+        // Removing a block before punctuation collapses spaces cleanly.
+        let mut trimmed = doc.clone();
+        trimmed.remove_block(0);
+        assert_eq!(trimmed.to_raw(), "Hola, soy. Visito a {nombre} por {cosa}.");
+
+        // Moving a block earlier inside an existing slot keeps clean spacing.
+        let mut moved_left = doc.clone();
+        let visito_offset = " ".len();
+        moved_left.move_block(1, 1, visito_offset);
+        assert_eq!(
+            moved_left.to_raw(),
+            "Hola, soy {owner}. {nombre} Visito a por {cosa}."
+        );
+
+        // Moving a block later into the final slot moves cleanly without offset drift.
+        let mut moved_right = doc.clone();
+        moved_right.move_block(0, 3, 0);
+        assert_eq!(
+            moved_right.to_raw(),
+            "Hola, soy. Visito a {nombre} por {cosa} {owner}."
+        );
+
+        // Keyboard nudge swaps adjacent word boundaries cleanly.
+        let mut nudged = TemplateDoc::parse("Hola {owner} de México", &tags);
+        nudged.nudge_block(0, true);
+        assert_eq!(nudged.to_raw(), "Hola de {owner} México");
+        nudged.nudge_block(0, false);
+        assert_eq!(nudged.to_raw(), "Hola {owner} de México");
+
+        // Typing or pasting raw braces or friendly labels turns straight into blocks.
+        let mut datos = BTreeMap::new();
+        datos.insert("Mi empresa".to_owned(), "Soluciones del Valle".to_owned());
         let pairs = tag_pairs(&datos);
-        let friendly = to_friendly_text(bundled, &pairs);
-        assert!(!friendly.contains("{nombre}"));
-        assert!(!friendly.contains("Tu credencial"));
-        assert!(!friendly.contains("Valor agregado"));
-        assert!(friendly.contains("[Diferenciador]"));
-        assert_eq!(from_friendly_text(&friendly, &pairs), bundled);
-
-        let mut labels = labels_ownership_map(&tags);
-        labels.insert("Mi empresa".into(), true);
-
-        // One Backspace touching a pill removes the entire block atomically without exposing '['.
-        let before = "Hola, soy [Nombre completo] y visito a [Nombre de la empresa].";
-        let backspaced_mid = "Hola, soy [Nombre complet] y visito a [Nombre de la empresa].";
-        assert_eq!(
-            normalize_block_edit(before, backspaced_mid, &pairs, &labels),
-            "Hola, soy y visito a [Nombre de la empresa]."
-        );
-        let backspaced_end = "Hola, soy [Nombre completo y visito a [Nombre de la empresa].";
-        assert_eq!(
-            normalize_block_edit(before, backspaced_end, &pairs, &labels),
-            "Hola, soy y visito a [Nombre de la empresa]."
-        );
-
-        // Typing accidentally inside a pill keeps the pill whole and pushes text cleanly outside.
-        let typed_inside = "Hola, soy [Nombre comxpleto] y visito a [Nombre de la empresa].";
-        let outside = normalize_block_edit(before, typed_inside, &pairs, &labels);
-        assert!(outside.contains("[Nombre completo]"));
-        assert!(!outside.contains("[Nombre comxpleto]"));
-
-        // Dropping a chip between two words or adjacent blocks preserves spacing while keeping punctuation flush.
-        let pre_drop = "Estuve revisando ay quería.";
-        let dropped_mid = "Estuve revisando a[Nombre de la empresa]y quería.";
-        assert_eq!(
-            normalize_block_edit(pre_drop, dropped_mid, &pairs, &labels),
-            "Estuve revisando a [Nombre de la empresa] y quería."
-        );
-        let pre_dot = "Soy .";
-        let dropped_dot = "Soy [Nombre completo].";
-        assert_eq!(
-            normalize_block_edit(pre_dot, dropped_dot, &pairs, &labels),
-            "Soy [Nombre completo]."
-        );
-        let pre_pair = "Soy .";
-        let dropped_pair = "Soy [Nombre completo][Nombre de la empresa].";
-        assert_eq!(
-            normalize_block_edit(pre_pair, dropped_pair, &pairs, &labels),
-            "Soy [Nombre completo] [Nombre de la empresa]."
-        );
+        let mut pasted = TemplateDoc::parse("Soy [Nombre completo] en {mi_empresa}.", &tags);
+        // Raw braces parse immediately on load; brackets expand inline inside slots.
+        assert_eq!(pasted.blocks, vec!["mi_empresa"]);
+        let landed = pasted.expand_inline_tokens(0, &pairs, &tags);
+        assert_eq!(landed, Some(1));
+        assert_eq!(pasted.to_raw(), "Soy {owner} en {mi_empresa}.");
     }
 
     #[test]
@@ -1890,35 +2709,13 @@ mod tests {
         t.datos.insert("Mi empresa".into(), "Soluciones".into());
         assert!(new_datum_error(&t, "mi  empresa").is_some());
         t.validate().unwrap();
-        let text: String =
-            resolve_preview_parts("Soy {owner} de {mi_empresa}.", &settings, &t, None)
-                .into_iter()
-                .map(|part| match part {
-                    PreviewPart::Text(s) | PreviewPart::Block { value: s, .. } => s,
-                })
-                .collect();
-        assert_eq!(text, "Soy Sofía Méndez de Soluciones.");
-
-        let parts = resolve_preview_parts(
-            "Soy {owner} y visito a {nombre} ({portafolio}).",
+        let text = plain_sample_text(&resolve_preview_parts(
+            "Soy {owner} de {mi_empresa}.",
             &settings,
             &t,
             None,
-        );
-        assert!(parts.iter().any(|p| matches!(
-            p,
-            PreviewPart::Block { label, value, own: true }
-                if label == "Nombre completo" && value == "Sofía Méndez"
-        )));
-        assert!(parts.iter().any(|p| matches!(
-            p,
-            PreviewPart::Block { label, value, own: false }
-                if label == "Nombre de la empresa" && value == "Taller Industrial del Valle"
-        )));
-        assert!(parts.iter().any(|p| matches!(
-            p,
-            PreviewPart::Block { label, own: true, .. } if label == "Portafolio"
-        )));
+        ));
+        assert_eq!(text, "Soy Sofía Méndez de Soluciones.");
 
         // Paired email subjects stay attached to their body keys and fall back cleanly on legacy TOML.
         assert_eq!(
@@ -1939,100 +2736,131 @@ mod tests {
         let bundled = Templates::bundled_source();
         let t = Templates::parse_toml(bundled).unwrap();
         let settings = Settings::default();
-        let tpl = use_signal(|| bundled.to_owned());
+        let tpl_source = use_signal(|| bundled.to_owned());
+        let tpl_parsed = use_signal(|| Some(t.clone()));
+        let tpl = DraftState {
+            source: tpl_source,
+            parsed: tpl_parsed,
+        };
         let error = use_signal(String::new);
-        let active_field = use_signal(|| EditorField::Body);
+        let cursor_slot = use_signal(|| (EditorField::Body, 0usize));
+        let editing_slot = use_signal(|| None::<(EditorField, usize)>);
+        let pending_focus = use_signal(|| None::<(EditorField, usize)>);
+        let mounted_slot = use_signal(|| None::<((EditorField, usize), Rc<MountedData>)>);
+        let selected_block = use_signal(|| None::<(EditorField, usize)>);
         let hovered_tag = use_signal(|| None::<String>);
-        let mounted_inputs = use_signal(BTreeMap::<EditorField, Rc<MountedData>>::new);
-        let pending_focus = use_signal(|| None::<EditorField>);
+        let drag_payload = use_signal(|| None::<DragPayload>);
+        let drop_target = use_signal(|| None::<DropPos>);
         let adding = use_signal(|| false);
         let new_label = use_signal(String::new);
         let new_value = use_signal(String::new);
-        let all_tags = palette_tags(&t, &settings);
-        let biz_tags: Vec<ResolvedTag> = all_tags.iter().filter(|x| !x.own).cloned().collect();
-        let own_tags: Vec<ResolvedTag> = all_tags.iter().filter(|x| x.own).cloned().collect();
-        let tag_map: BTreeMap<String, ResolvedTag> = all_tags
-            .iter()
-            .map(|x| (x.key.clone(), x.clone()))
-            .collect();
+
+        let settings_for_memo = settings.clone();
+        let tags_bundle = use_memo(move || {
+            let vars = ProfileVars::from_settings(&settings_for_memo);
+            let datos = tpl
+                .parsed
+                .read()
+                .as_ref()
+                .map(|tr| tr.datos.clone())
+                .unwrap_or_default();
+            Rc::new(build_tags_bundle(&vars, &datos))
+        });
+        let datos_keys = use_memo(move || {
+            tpl.parsed
+                .read()
+                .as_ref()
+                .map(|tr| tr.datos.keys().cloned().collect())
+                .unwrap_or_default()
+        });
+        let bundle = tags_bundle.read();
         let subject_raw = email_subject_of(&t, "cuerpo_con_credencial");
         let body_raw = text_of(&t, 1, "cuerpo_con_credencial");
-        let preview_subject = resolve_preview_parts(&subject_raw, &settings, &t, None);
-        let preview_body = resolve_preview_parts(&body_raw, &settings, &t, None);
-        let preview_subject_len = preview_char_len(&preview_subject);
+        let subj_doc = Rc::new(TemplateDoc::parse(&subject_raw, &bundle.tags));
+        let body_doc = Rc::new(TemplateDoc::parse(&body_raw, &bundle.tags));
+        let words = count_doc_words(&body_doc, &bundle.tags);
+        let subj_len = count_doc_chars(&subj_doc, &bundle.tags);
+        assert_eq!(
+            words,
+            plain_sample_text(&resolve_preview_parts(&body_raw, &settings, &t, None))
+                .split_whitespace()
+                .count()
+        );
+        assert_eq!(
+            subj_len,
+            plain_sample_text(&resolve_preview_parts(&subject_raw, &settings, &t, None))
+                .chars()
+                .count()
+        );
+        assert_eq!(
+            doc_to_sample_string(&body_doc, &bundle.tags),
+            plain_sample_text(&resolve_preview_parts(&body_raw, &settings, &t, None))
+        );
+
         let ed = EditorSignals {
             tpl,
             error,
-            active_field,
-            hovered_tag,
-            mounted_inputs,
+            cursor_slot,
+            editing_slot,
             pending_focus,
+            mounted_slot,
+            selected_block,
+            hovered_tag,
+            drag_payload,
+            drop_target,
         };
-        let doc_ctx = EditorDocContext {
-            category: 1,
-            template_key: "cuerpo_con_credencial".into(),
-            subject_raw: subject_raw.clone(),
-            body_raw: body_raw.clone(),
-            pairs: tag_pairs(&t.datos),
-            labels: labels_ownership_map(&all_tags),
-            tags: tag_map,
-        };
+        let tkey: Rc<str> = Rc::from("cuerpo_con_credencial");
         rsx! {
             PalettePanel {
                 is_email: true,
                 cur_epoch: 0,
-                biz_tags,
-                own_tags,
-                doc_ctx: doc_ctx.clone(),
+                category: 1,
+                template_key: tkey.clone(),
+                tags_bundle,
+                datos_keys,
                 ed,
                 adding,
                 new_label,
                 new_value,
-                templates_ref: t,
             }
-            div { class: "st-split-work",
-                div { class: "st-split-ed",
-                    TemplateEditorPane {
-                        cat: 1,
-                        is_giro: false,
-                        is_email: true,
-                        cur_epoch: 0,
-                        current_key: "cuerpo_con_credencial".to_owned(),
-                        giro: BTreeMap::new(),
-                        doc_ctx,
-                        ed,
-                        subject_raw,
-                        body_raw,
-                        preview_subject_len,
-                    }
-                }
-                div { class: "st-split-prev",
-                    PreviewCard {
-                        is_giro: false,
-                        preview_subject: Some(preview_subject),
-                        preview_body,
-                    }
-                }
+            UnifiedComposer {
+                cat: 1,
+                is_giro: false,
+                is_email: true,
+                cur_epoch: 0,
+                template_key: tkey,
+                giro: BTreeMap::new(),
+                body_doc,
+                subj_doc: Some(subj_doc),
+                words,
+                subj_len,
+                giro_sample: String::new(),
+                tags_bundle,
+                ed,
             }
         }
     }
 
     #[test]
-    fn unified_email_editor_renders_paired_subject_body_blocks_and_preview() {
+    fn unified_email_composer_renders_subject_and_body_with_interactive_sample_pills() {
         let mut dom = VirtualDom::new(EmailPaneProbe);
         dom.rebuild_in_place();
         let html = dioxus_ssr::render(&dom);
-        assert!(html.contains("Asunto del correo"));
-        assert!(html.contains("Mensaje del correo"));
-        assert!(html.contains("st-split-work"));
-        assert!(html.contains("st-mail-subject"));
-        assert!(html.contains("st-prev-token biz"));
-        assert!(html.contains("st-prev-token own"));
+        assert!(html.contains("st-unified-card st-mail"));
+        assert!(html.contains("st-mail-subject-row"));
+        assert!(html.contains("Asunto"));
+        assert!(html.contains("st-token-pill biz"));
+        assert!(html.contains("st-token-pill own"));
+        assert!(html.contains("st-pill-del"));
         assert!(html.contains("órdenes y refacciones"));
-        assert!(html.contains("class=\"st-rich-lbl\">Diferenciador<"));
+        assert!(html.contains("Sofía Méndez"));
+        assert!(html.contains("Bloque: Diferenciador"));
+        assert!(html.contains("Quitar bloque Nombre completo"));
         assert!(html.contains("Portafolio"));
         assert!(html.contains("LinkedIn"));
         assert!(html.contains("Página web"));
+        assert!(!html.contains("st-split-work"));
+        assert!(!html.contains("Vista previa en vivo"));
         assert!(!html.contains("{cosa}"));
         assert!(!html.contains("{credencial}"));
     }

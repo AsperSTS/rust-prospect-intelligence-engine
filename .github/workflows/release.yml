@@ -88,22 +88,30 @@ jobs:
       - name: Preparar dependencias offline bloqueadas
         run: cargo fetch --locked
 
-      - name: Compilar bundle macOS limpio (sin credenciales ni DMG)
+      - name: Compilar bundle macOS limpio (sin credenciales)
         run: |
           unset DENUE_TOKEN INEGI_TOKEN BANXICO_TOKEN
           ./scripts/bundle-macos.sh
 
-      - name: Empaquetar artefactos macOS
+      - name: Empaquetar instalador (.dmg) y app (.app.zip) macOS
         run: |
           VERSION="${{ needs.precheck.outputs.version }}"
           mkdir -p release-assets
+          DMG_STAGE=$(mktemp -d)
+          trap 'rm -rf "$DMG_STAGE"' EXIT
+          /usr/bin/ditto "dist/Prospect Intelligence.app" "$DMG_STAGE/Prospect Intelligence.app"
+          ln -s /Applications "$DMG_STAGE/Applications"
+          rm -f \
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.dmg" \
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.app.zip"
+          /usr/bin/hdiutil create \
+            -volname "Prospect Intelligence" \
+            -srcfolder "$DMG_STAGE" \
+            -ov -format UDZO \
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.dmg"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
             "dist/Prospect Intelligence.app" \
-            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.zip"
-          /usr/bin/tar -czf \
-            "release-assets/prospectos-${VERSION}-macOS-arm64.tar.gz" \
-            -C dist prospectos \
-            -C "$PWD" LICENSE THIRD_PARTY_NOTICES.md
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.app.zip"
 
       - name: Auditoría estricta de artefactos macOS y humo CLI aislado
         run: |
@@ -162,26 +170,16 @@ jobs:
           trap 'rm -rf "$TMP_HOME"' EXIT
           PROSPECTOS_HOME="$TMP_HOME" ./dist/windows/cli/prospectos.exe inspect
 
-      - name: Empaquetar artefactos Windows (.zip) y verificar higiene
+      - name: Preparar ejecutable GUI Windows (.exe) y verificar higiene
         shell: bash
         run: |
           VERSION="${{ needs.precheck.outputs.version }}"
+          if find dist/windows/app -type f | grep -iE '(^|/)(credentials\.env|\.env(\..*)?|prospectos\.db|settings\.json|templates\.toml|AGENTS\.md)$|\.(db|db-wal|db-shm|sqlite|sqlite3|xlsx|csv)$' >/dev/null; then
+            echo "Error: se encontraron archivos prohibidos en dist/windows/app." >&2
+            exit 1
+          fi
           mkdir -p release-assets
-          python3 - <<PY
-          import pathlib, zipfile
-
-          version = "${VERSION}"
-          def pack_dir(src_dir, archive_path, arc_prefix):
-              src = pathlib.Path(src_dir)
-              with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                  for item in sorted(src.rglob("*")):
-                      if item.is_file():
-                          rel = item.relative_to(src).as_posix()
-                          zf.write(item, f"{arc_prefix}/{rel}")
-
-          pack_dir("dist/windows/app", f"release-assets/Prospect-Intelligence-{version}-Windows-x64.zip", "Prospect Intelligence")
-          pack_dir("dist/windows/cli", f"release-assets/prospectos-{version}-Windows-x64.zip", f"prospectos-{version}-Windows-x64")
-          PY
+          cp "dist/windows/app/ProspectIntelligence.exe" "release-assets/Prospect-Intelligence-${VERSION}-Windows-x64.exe"
           ./scripts/verify-public-hygiene.sh --archives
 
       - name: Subir artefactos Windows
@@ -211,7 +209,7 @@ jobs:
           ./scripts/verify-public-hygiene.sh --archives
           (
             cd release-assets
-            sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+            sha256sum *.dmg *.zip *.exe > SHA256SUMS.txt
             cat SHA256SUMS.txt
           )
 
@@ -229,25 +227,18 @@ jobs:
         run: |
           VERSION="${{ needs.precheck.outputs.version }}"
           cat > release-notes.md <<NOTES
-          ## Prospect Intelligence ${VERSION} (macOS arm64 y Windows x64)
+          ## Prospect Intelligence ${VERSION}
 
-          - **Distribución limpia:** no incluye bases de datos, contactos ni tokens de APIs. Al abrir la aplicación por primera vez se solicitarán tus propios tokens gratuitos (guardados localmente de forma privada), con enlaces e instrucciones integrados para obtenerlos:
-            - **INEGI DENUE (obligatorio):** \`https://www.inegi.org.mx/servicios/api_denue.html\` (Guía para desarrolladores → correo electrónico).
-            - **INEGI Indicadores (opcional):** \`https://www.inegi.org.mx/servicios/api_indicadores.html\` (o reutiliza tu token DENUE).
-            - **Banxico SIE (opcional, tipo de cambio):** \`https://www.banxico.org.mx/SieAPIRest/service/v1/token\` (captcha → Generar token).
-          - **macOS (Apple Silicon / arm64):**
-            - \`Prospect-Intelligence-${VERSION}-macOS-arm64.zip\`: aplicación \`Prospect Intelligence.app\`. Tiene firma *ad-hoc* (sin notarización Developer ID): al abrir por primera vez usa clic derecho → **Abrir** o **Ajustes del Sistema → Privacidad y seguridad**.
-            - \`prospectos-${VERSION}-macOS-arm64.tar.gz\`: CLI \`prospectos\` con \`LICENSE\` y \`THIRD_PARTY_NOTICES.md\`.
-          - **Windows (x64, experimental sin prueba física en hardware Windows):**
-            - \`Prospect-Intelligence-${VERSION}-Windows-x64.zip\`: \`ProspectIntelligence.exe\` (requiere WebView2 Runtime, incluido en Windows 11 y Windows 10 actualizado; si aparece SmartScreen sin firma Authenticode, elige **Más información → Ejecutar de todas formas**).
-            - \`prospectos-${VERSION}-Windows-x64.zip\`: CLI \`prospectos.exe\` con \`LICENSE\` y \`THIRD_PARTY_NOTICES.md\`.
-          - **Integridad:** \`SHA256SUMS.txt\` incluye las sumas SHA-256 de todos los archivos adjuntos.
+          Descarga directa para escritorio, sin bases de datos ni tokens incluidos (al abrir por primera vez configuras tus claves gratuitas de INEGI y Banxico desde la app).
+
+          - **macOS (Apple Silicon):** elige \`Prospect-Intelligence-${VERSION}-macOS-arm64.dmg\` (instalador visual para arrastrar a **Aplicaciones**) o \`Prospect-Intelligence-${VERSION}-macOS-arm64.app.zip\` (\`.app\` lista para descomprimir). La primera vez ábrela con clic derecho → **Abrir** (o desde **Ajustes del Sistema → Privacidad y seguridad**).
+          - **Windows (x64, experimental):** \`Prospect-Intelligence-${VERSION}-Windows-x64.exe\` — ejecutable directo (requiere WebView2 Runtime, incluido en Windows 11). Si aparece SmartScreen, elige **Más información → Ejecutar de todas formas**.
+          - **Verificación:** \`SHA256SUMS.txt\`
           NOTES
           gh release create "$GITHUB_REF_NAME" \
-            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.zip" \
-            "release-assets/prospectos-${VERSION}-macOS-arm64.tar.gz" \
-            "release-assets/Prospect-Intelligence-${VERSION}-Windows-x64.zip" \
-            "release-assets/prospectos-${VERSION}-Windows-x64.zip" \
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.dmg" \
+            "release-assets/Prospect-Intelligence-${VERSION}-macOS-arm64.app.zip" \
+            "release-assets/Prospect-Intelligence-${VERSION}-Windows-x64.exe" \
             "release-assets/SHA256SUMS.txt" \
             --verify-tag \
             --title "Prospect Intelligence v${VERSION}" \

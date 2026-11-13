@@ -97,10 +97,10 @@ const TPL_POINT_1: &[HelpSegment] = &[HelpSegment::Text(
     "Pestañas superiores: cambia entre WhatsApp, Correos (cada correo edita su Asunto y su Mensaje juntos), Seguimientos y Giros.",
 )];
 const TPL_POINT_2: &[HelpSegment] = &[HelpSegment::Text(
-    "Edición a la izquierda y Vista previa a la derecha: mientras editas ves de forma simultánea el mensaje resuelto con cada bloque resaltado.",
+    "Lienzo único en vivo: ves el mensaje con datos de ejemplo y editas cualquier tramo con un clic.",
 )];
 const TPL_POINT_3: &[HelpSegment] = &[HelpSegment::Text(
-    "Bloques accesibles: haz clic en la paleta para añadir un bloque o arrástralo al lugar exacto del texto. Una pulsación de Retroceso quita un bloque completo.",
+    "Bloques interactivos: haz clic arriba para añadir, arrástralos dentro del texto para moverlos, pasa el cursor para ver qué bloque es o pulsa × para quitarlo.",
 )];
 const TPL_POINTS: &[&[HelpSegment]] = &[TPL_POINT_1, TPL_POINT_2, TPL_POINT_3];
 
@@ -245,6 +245,30 @@ fn HelpModal(mut topic: Signal<Option<HelpTopic>>) -> Element {
     }
 }
 
+fn svg_chevron(open: bool) -> Element {
+    let d = if open {
+        "M3.5 10L8 5.5 12.5 10"
+    } else {
+        "M3.5 6L8 10.5 12.5 6"
+    };
+    rsx! {
+        svg {
+            view_box: "0 0 16 16",
+            width: "14",
+            height: "14",
+            fill: "none",
+            "aria-hidden": "true",
+            path {
+                d: d,
+                stroke: "currentColor",
+                stroke_width: "1.9",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+            }
+        }
+    }
+}
+
 fn svg_check() -> Element {
     rsx! {
         svg {
@@ -379,40 +403,49 @@ fn normalized(mut settings: Settings, profile: &str) -> Settings {
 }
 
 #[component]
-fn ProfilePanel(draft: Signal<Settings>, tpl: Signal<String>) -> Element {
+fn ProfilePanel(
+    mut draft: Signal<Settings>,
+    tpl: templates::DraftState,
+    datos_rows: Memo<Vec<(String, String, bool)>>,
+    mut open: Signal<bool>,
+) -> Element {
     let mut ui = use_context::<UiState>();
     let paths = consume_context::<Services>().db.paths;
     let snapshot = draft.read().clone();
-    let source = tpl.read().clone();
-    let datos = Templates::parse_toml(&source)
-        .map(|t| t.datos)
-        .unwrap_or_default();
-    let used = |key: &str| source.contains(&format!("{{{key}}}"));
+    let datos = datos_rows.read();
     let error = use_signal(String::new);
     let mut value_tip = use_signal(|| false);
-    let mut profile_open = use_signal(|| true);
+    let is_open = *open.read();
 
     rsx! {
         section {
-            class: if *profile_open.read() { "panel st-profile" } else { "panel st-profile collapsed" },
+            class: if is_open { "panel st-profile" } else { "panel st-profile collapsed" },
             div { class: "panel-heading",
                 h2 { "Perfil" }
-                span { class: "muted small st-head-meta", "Tus datos personales y enlaces se insertan solos al usar sus bloques" }
+                if !is_open {
+                    span { class: "muted small st-head-meta",
+                        "Oculto · despliega para editar"
+                    }
+                }
                 button {
                     class: "button secondary compact st-collapse-btn",
                     r#type: "button",
-                    aria_expanded: *profile_open.read(),
+                    aria_expanded: if is_open { "true" } else { "false" },
+                    title: if is_open { "Ocultar perfil y subir plantillas" } else { "Desplegar perfil" },
                     onclick: move |_| {
-                        let next = !*profile_open.peek();
-                        profile_open.set(next);
+                        let next = !*open.peek();
+                        open.set(next);
                     },
-                    if *profile_open.read() { "Minimizar" } else { "Expandir perfil" }
+                    {svg_chevron(is_open)}
+                    span {
+                        if is_open { "Ocultar perfil" } else { "Desplegar perfil" }
+                    }
                 }
                 HelpButton { topic: HelpTopic::Profile, label: "Perfil" }
             }
             div {
                 class: "form-body st-profile-body",
-                hidden: !*profile_open.read(),
+                hidden: !is_open,
                 div { class: "st-profile-grid",
                     label {
                         "Nombre completo"
@@ -458,9 +491,8 @@ fn ProfilePanel(draft: Signal<Settings>, tpl: Signal<String>) -> Element {
                             oninput: move |e: FormEvent| draft.write().owner_website = e.value(),
                         }
                     }
-                    for (label, value) in datos {
+                    for (label, value, in_use) in datos.iter().cloned() {
                         {
-                            let in_use = used(&prospect_core::messages::data_key(&label));
                             let edit_label = label.clone();
                             let remove_label = label.clone();
                             rsx! {
@@ -526,7 +558,7 @@ fn ProfilePanel(draft: Signal<Settings>, tpl: Signal<String>) -> Element {
                         TextEntry {
                             label: "Diferenciador".to_owned(),
                             initial: snapshot.owner_credential.clone(),
-                            placeholder: "Qué problema resuelves o qué resultado aportas en una frase corta",
+                            placeholder: "Qué problema resuelves en una frase corta",
                             oninput: move |e: FormEvent| draft.write().owner_credential = e.value(),
                         }
                     }
@@ -595,22 +627,136 @@ fn ProfilePanel(draft: Signal<Settings>, tpl: Signal<String>) -> Element {
 }
 
 #[component]
-pub(super) fn SettingsPanel() -> Element {
+fn SettingsSaveBar(
+    mut draft: Signal<Settings>,
+    mut seen: Signal<Settings>,
+    tpl: templates::DraftState,
+    mut tpl_saved: Signal<String>,
+) -> Element {
+    let mut ui = use_context::<UiState>();
     let service = consume_context::<Services>();
     let db = service.db.clone();
     let paths = db.paths.clone();
-    let mut ui = use_context::<UiState>();
+    let saved = ui.settings.read().clone();
+    let draft_snap = draft.read().clone();
+    let dirty = normalized(draft_snap.clone(), &saved.profile)
+        != normalized(saved.clone(), &saved.profile)
+        || *tpl.source.read() != *tpl_saved.read();
+    let added_states = draft_snap
+        .entities
+        .iter()
+        .any(|code| !saved.entities.contains(code));
+
+    rsx! {
+        div { class: "st-savebar",
+            if dirty {
+                span { class: "st-dirty", role: "status",
+                    if added_states {
+                        "Nuevo estado seleccionado · guarda cambios"
+                    } else {
+                        "Cambios sin guardar"
+                    }
+                }
+            }
+            button {
+                class: if dirty && added_states { "button primary st-save-attention" } else { "button primary" },
+                disabled: !dirty,
+                onclick: move |_| {
+                    let before = ui.settings.peek().clone();
+                    let next = normalized(draft.peek().clone(), &before.profile);
+                    let source = tpl.source.peek().clone();
+                    if source != *tpl_saved.peek() {
+                        if let Err(e) = Templates::save(&paths.home, &source) {
+                            ui.toast.set(format!("Plantillas sin guardar: {e}"));
+                            return;
+                        }
+                        tpl_saved.set(source);
+                    }
+                    if let Err(e) = next.save(&paths) {
+                        ui.toast.set(e.to_string());
+                        return;
+                    }
+                    let added: Vec<String> = next
+                        .entities
+                        .iter()
+                        .filter(|code| !before.entities.contains(code))
+                        .cloned()
+                        .collect();
+                    draft.set(next.clone());
+                    seen.set(next.clone());
+                    ui.settings.set(next);
+                    ui.revision += 1;
+                    ui.toast.set("Cambios guardados.".into());
+                    if added.is_empty() {
+                        return;
+                    }
+                    let names = added
+                        .iter()
+                        .map(|code| prospect_core::config::entity_name(code))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let has_token = paths
+                        .secrets()
+                        .map(|s| !s.denue.trim().is_empty())
+                        .unwrap_or(false);
+                    if has_token {
+                        job_start_sync(
+                            ui,
+                            db.clone(),
+                            Some(added),
+                            false,
+                            true,
+                            Some(format!("Actualizando · {names}")),
+                        );
+                    } else {
+                        ui.toast.set(format!(
+                            "{names} agregado. Configura tu token DENUE en Tokens y fuentes para descargarlo."
+                        ));
+                    }
+                },
+                "Guardar cambios"
+            }
+        }
+    }
+}
+
+#[component]
+pub(super) fn SettingsPanel() -> Element {
+    let service = consume_context::<Services>();
+    let ui = use_context::<UiState>();
     let pane = ui.settings_tab;
+    let profile_open = use_signal(|| true);
     let help_topic = use_signal(|| None::<HelpTopic>);
     use_context_provider(|| HelpContext { topic: help_topic });
     let mut draft = use_signal(|| ui.settings.peek().clone());
     let mut seen = use_signal(|| ui.settings.peek().clone());
-    let home = paths.home.clone();
-    let initial = use_hook(|| {
-        Templates::source(&home).unwrap_or_else(|_| Templates::bundled_source().into())
+    let home = service.db.paths.home.clone();
+    let (initial, initial_parsed) = use_hook(|| {
+        let src = Templates::source(&home).unwrap_or_else(|_| Templates::bundled_source().into());
+        let parsed = Templates::parse_toml(&src).ok();
+        (src, parsed)
     });
-    let tpl = use_signal(|| initial.clone());
-    let mut tpl_saved = use_signal(|| initial);
+    let tpl_source = use_signal(|| initial.clone());
+    let tpl_parsed = use_signal(|| initial_parsed);
+    let tpl = templates::DraftState {
+        source: tpl_source,
+        parsed: tpl_parsed,
+    };
+    let tpl_saved = use_signal(|| initial);
+    let datos_rows = use_memo(move || {
+        let guard = tpl.parsed.read();
+        let Some(t) = guard.as_ref() else {
+            return Vec::new();
+        };
+        t.datos
+            .iter()
+            .map(|(label, value)| {
+                let in_use =
+                    templates::templates_use_key(t, &prospect_core::messages::data_key(label));
+                (label.clone(), value.clone(), in_use)
+            })
+            .collect::<Vec<_>>()
+    });
 
     // Switching the offer profile elsewhere must not discard edits in progress here.
     use_effect(move || {
@@ -642,15 +788,6 @@ pub(super) fn SettingsPanel() -> Element {
     }
 
     let current_tab = *pane.read();
-    let saved = ui.settings.read().clone();
-    let draft_snap = draft.read().clone();
-    let dirty = normalized(draft_snap.clone(), &saved.profile)
-        != normalized(saved.clone(), &saved.profile)
-        || *tpl.read() != *tpl_saved.read();
-    let added_states = draft_snap
-        .entities
-        .iter()
-        .any(|code| !saved.entities.contains(code));
 
     rsx! {
         div { class: "settings-work",
@@ -661,81 +798,18 @@ pub(super) fn SettingsPanel() -> Element {
                     name: "Ajustes",
                 }
                 if current_tab < 2 {
-                    div { class: "st-savebar",
-                        if dirty {
-                            span { class: "st-dirty", role: "status",
-                                if added_states {
-                                    "Nuevo estado seleccionado · guarda cambios"
-                                } else {
-                                    "Cambios sin guardar"
-                                }
-                            }
-                        }
-                        button {
-                            class: if dirty && added_states { "button primary st-save-attention" } else { "button primary" },
-                            disabled: !dirty,
-                            onclick: move |_| {
-                                let before = ui.settings.peek().clone();
-                                let next = normalized(draft.peek().clone(), &before.profile);
-                                let source = tpl.peek().clone();
-                                if source != *tpl_saved.peek() {
-                                    if let Err(e) = Templates::save(&paths.home, &source) {
-                                        ui.toast.set(format!("Plantillas sin guardar: {e}"));
-                                        return;
-                                    }
-                                    tpl_saved.set(source);
-                                }
-                                if let Err(e) = next.save(&paths) {
-                                    ui.toast.set(e.to_string());
-                                    return;
-                                }
-                                let added: Vec<String> = next
-                                    .entities
-                                    .iter()
-                                    .filter(|code| !before.entities.contains(code))
-                                    .cloned()
-                                    .collect();
-                                draft.set(next.clone());
-                                seen.set(next.clone());
-                                ui.settings.set(next);
-                                ui.revision += 1;
-                                ui.toast.set("Cambios guardados.".into());
-                                if added.is_empty() {
-                                    return;
-                                }
-                                let names = added
-                                    .iter()
-                                    .map(|code| prospect_core::config::entity_name(code))
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                let has_token = paths
-                                    .secrets()
-                                    .map(|s| !s.denue.trim().is_empty())
-                                    .unwrap_or(false);
-                                if has_token {
-                                    job_start_sync(
-                                        ui,
-                                        db.clone(),
-                                        Some(added),
-                                        false,
-                                        true,
-                                        Some(format!("Actualizando · {names}")),
-                                    );
-                                } else {
-                                    ui.toast.set(format!(
-                                        "{names} agregado. Configura tu token DENUE en Tokens y fuentes para descargarlo."
-                                    ));
-                                }
-                            },
-                            "Guardar cambios"
-                        }
+                    SettingsSaveBar {
+                        draft,
+                        seen,
+                        tpl,
+                        tpl_saved,
                     }
                 }
             }
             if current_tab == 0 {
                 div { class: "st-grid st-grid-profile",
-                    ProfilePanel { draft, tpl }
-                    templates::TemplateCanvas { tpl, settings: draft.read().clone() }
+                    ProfilePanel { draft, tpl, datos_rows, open: profile_open }
+                    templates::TemplateCanvas { tpl, settings: draft }
                 }
             } else if current_tab == 1 {
                 scope::ScopeTab { draft, pane }
@@ -973,5 +1047,66 @@ mod tests {
             }
             assert!(html.contains("Entendido"), "{title}");
         }
+    }
+
+    #[derive(Clone, Copy, PartialEq, Props)]
+    struct ProfileToggleProbeProps {
+        initial_open: bool,
+    }
+
+    #[component]
+    fn ProfileToggleProbe(props: ProfileToggleProbeProps) -> Element {
+        let services = consume_context::<crate::Services>();
+        use_context_provider(|| super::review_tests::make_test_ui_state(&services, 0));
+        let draft = use_signal(|| services.settings.clone());
+        let tpl_source = use_signal(|| Templates::bundled_source().to_owned());
+        let tpl_parsed = use_signal(|| Templates::parse_toml(Templates::bundled_source()).ok());
+        let tpl = super::templates::DraftState {
+            source: tpl_source,
+            parsed: tpl_parsed,
+        };
+        let datos_rows = use_memo(Vec::new);
+        let open = use_signal(|| props.initial_open);
+        rsx! { ProfilePanel { draft, tpl, datos_rows, open } }
+    }
+
+    #[test]
+    fn profile_panel_collapses_and_expands_with_clear_chevron() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = prospect_core::AppPaths::at(temp.path()).unwrap();
+        let settings = prospect_core::Settings::load_desktop(&paths).unwrap();
+        let db = prospect_core::Db::open(paths).unwrap();
+        let services = crate::Services {
+            db,
+            settings,
+            layout: crate::Layout::Desktop,
+        };
+
+        let mut expanded = VirtualDom::new_with_props(
+            ProfileToggleProbe,
+            ProfileToggleProbeProps { initial_open: true },
+        )
+        .with_root_context(services.clone());
+        expanded.rebuild_in_place();
+        let open_html = dioxus_ssr::render(&expanded);
+        assert!(open_html.contains("class=\"panel st-profile\""));
+        assert!(open_html.contains("aria-expanded=\"true\""));
+        assert!(open_html.contains("Ocultar perfil"));
+        assert!(open_html.contains("M3.5 10L8 5.5 12.5 10"));
+
+        let mut collapsed = VirtualDom::new_with_props(
+            ProfileToggleProbe,
+            ProfileToggleProbeProps {
+                initial_open: false,
+            },
+        )
+        .with_root_context(services);
+        collapsed.rebuild_in_place();
+        let closed_html = dioxus_ssr::render(&collapsed);
+        assert!(closed_html.contains("class=\"panel st-profile collapsed\""));
+        assert!(closed_html.contains("aria-expanded=\"false\""));
+        assert!(closed_html.contains("Desplegar perfil"));
+        assert!(closed_html.contains("M3.5 6L8 10.5 12.5 6"));
+        assert!(closed_html.contains("class=\"form-body st-profile-body\" hidden"));
     }
 }

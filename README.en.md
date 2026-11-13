@@ -21,8 +21,8 @@ Most B2B lead tools charge USD subscriptions and have poor coverage for local bu
 
 ## Platforms
 
-- **macOS (Apple Silicon) & iOS:** native desktop bundle (`Prospect Intelligence.app`) plus iOS entry point (in development); macOS builds are published under [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases).
-- **Windows (x64):** compiled, tested in CI, and packaged as a portable zip under [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases) (`ProspectIntelligence.exe` + `prospectos.exe`, pending manual testing on real Windows hardware; requires Microsoft Edge WebView2 Runtime, preinstalled on Windows 11).
+- **macOS (Apple Silicon) & iOS:** native desktop bundle (`Prospect Intelligence.app` / `.dmg` installer) plus iOS entry point (in development); macOS builds are published under [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases).
+- **Windows (x64):** compiled, tested in CI, and published as a standalone executable under [Releases](https://github.com/AsperSTS/rust-prospect-intelligence-engine/releases) (pending manual testing on real Windows hardware; requires Microsoft Edge WebView2 Runtime, preinstalled on Windows 11).
 
 ## First launch
 

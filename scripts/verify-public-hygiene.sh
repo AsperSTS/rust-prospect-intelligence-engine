@@ -36,7 +36,7 @@ check_archives() {
         exit 1
     fi
     python3 - <<'PY'
-import pathlib, re, sys, tarfile, zipfile
+import os, pathlib, platform, re, subprocess, sys, tarfile, tempfile, zipfile
 
 forbidden = re.compile(
     r"(^|/)(credentials\.env|\.env(\..*)?|prospectos\.db|settings\.json|templates\.toml|AGENTS\.md)$|\.(db|db-wal|db-shm|sqlite|sqlite3|xlsx|csv)$",
@@ -44,6 +44,8 @@ forbidden = re.compile(
 )
 checked = 0
 for archive in sorted(pathlib.Path("release-assets").iterdir()):
+    if archive.is_dir():
+        continue
     if archive.suffix == ".zip":
         checked += 1
         with zipfile.ZipFile(archive) as zf:
@@ -52,6 +54,73 @@ for archive in sorted(pathlib.Path("release-assets").iterdir()):
         checked += 1
         with tarfile.open(archive, "r:gz") as tf:
             names = [m.name for m in tf.getmembers()]
+    elif archive.suffix == ".exe":
+        checked += 1
+        names = [archive.name]
+        with archive.open("rb") as fh:
+            if fh.read(2) != b"MZ":
+                print(f"Error de formato PE en {archive}", file=sys.stderr)
+                sys.exit(1)
+    elif archive.suffix == ".dmg":
+        checked += 1
+        names = [archive.name]
+        size = archive.stat().st_size
+        if size < 512:
+            print(f"Error: DMG vacío o corrupto en {archive}", file=sys.stderr)
+            sys.exit(1)
+        with archive.open("rb") as fh:
+            fh.seek(size - 512)
+            if fh.read(4) != b"koly":
+                print(f"Error de firma UDIF en {archive}", file=sys.stderr)
+                sys.exit(1)
+        if platform.system() == "Darwin":
+            subprocess.run(["/usr/bin/hdiutil", "verify", str(archive)], check=True)
+            with tempfile.TemporaryDirectory() as mnt:
+                attached = False
+                try:
+                    subprocess.run(
+                        [
+                            "/usr/bin/hdiutil",
+                            "attach",
+                            "-readonly",
+                            "-nobrowse",
+                            "-noverify",
+                            "-noautoopen",
+                            "-mountpoint",
+                            mnt,
+                            str(archive),
+                        ],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                    )
+                    attached = True
+                    for root, dirs, files in os.walk(mnt, followlinks=False):
+                        dirs[:] = [d for d in dirs if not (pathlib.Path(root) / d).is_symlink()]
+                        for fname in files:
+                            fpath = pathlib.Path(root) / fname
+                            if fpath.is_symlink():
+                                continue
+                            names.append(fpath.relative_to(mnt).as_posix())
+                    app_inside = pathlib.Path(mnt) / "Prospect Intelligence.app"
+                    if not app_inside.is_dir():
+                        print(f"Falta Prospect Intelligence.app dentro de {archive}", file=sys.stderr)
+                        sys.exit(1)
+                    subprocess.run(
+                        ["/usr/bin/plutil", "-lint", str(app_inside / "Contents/Info.plist")],
+                        check=True,
+                    )
+                    subprocess.run(
+                        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app_inside)],
+                        check=True,
+                    )
+                finally:
+                    if attached:
+                        subprocess.run(
+                            ["/usr/bin/hdiutil", "detach", mnt, "-force"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
     else:
         continue
     bad = [n for n in names if forbidden.search(n.replace("\\", "/"))]
@@ -59,7 +128,7 @@ for archive in sorted(pathlib.Path("release-assets").iterdir()):
         print(f"Error de higiene en {archive}: {bad}", file=sys.stderr)
         sys.exit(1)
 if checked == 0:
-    print("No se encontraron archivos .zip o .tar.gz en release-assets/.", file=sys.stderr)
+    print("No se encontraron archivos de release verificables en release-assets/.", file=sys.stderr)
     sys.exit(1)
 print(f"Higiene de archivos de release verificada ({checked} archivo(s)).")
 PY

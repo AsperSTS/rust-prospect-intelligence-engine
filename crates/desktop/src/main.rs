@@ -35,7 +35,8 @@ fn start() -> prospect_core::Result<()> {
                 .with_inner_size(dioxus::desktop::LogicalSize::new(1440.0, 900.0))
                 .with_min_inner_size(dioxus::desktop::LogicalSize::new(1000.0, 650.0)),
         )
-        .with_data_directory(paths.home.join("webview"));
+        .with_data_directory(paths.home.join("webview"))
+        .with_disable_drag_drop_handler(true);
     LaunchBuilder::desktop()
         .with_cfg(config)
         .with_context(Services {
