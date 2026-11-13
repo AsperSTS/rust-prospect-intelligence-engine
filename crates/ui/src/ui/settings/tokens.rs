@@ -91,7 +91,8 @@ pub(super) fn TokensTab(mut pane: Signal<usize>) -> Element {
             section { class: "panel st-tokens",
                 div { class: "panel-heading",
                     h2 { "Tokens" }
-                    span { class: "muted small", "Gratuitos y a tu nombre" }
+                    span { class: "muted small st-head-meta", "Gratuitos y a tu nombre" }
+                    super::HelpButton { topic: super::HelpTopic::Tokens, label: "Tokens" }
                 }
                 div { class: "form-body",
                     TokenRow {
@@ -146,7 +147,10 @@ pub(super) fn TokensTab(mut pane: Signal<usize>) -> Element {
                 }
             }
             section { class: "panel st-backup",
-                div { class: "panel-heading", h2 { "Respaldo" } }
+                div { class: "panel-heading",
+                    h2 { "Respaldo" }
+                    super::HelpButton { topic: super::HelpTopic::Backup, label: "Respaldo" }
+                }
                 div { class: "form-body",
                     div { class: "st-block",
                         strong { "Llévate todo en un archivo" }

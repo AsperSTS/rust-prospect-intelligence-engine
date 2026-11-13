@@ -197,6 +197,9 @@ pub struct Settings {
     pub owner_name: String,
     pub owner_whatsapp: String,
     pub owner_credential: String,
+    pub owner_portfolio: String,
+    pub owner_linkedin: String,
+    pub owner_website: String,
     pub profile: String,
     pub theme: String,
     pub entities: Vec<String>,
@@ -219,6 +222,9 @@ impl Default for Settings {
             owner_name: "Tu nombre".into(),
             owner_whatsapp: String::new(),
             owner_credential: String::new(),
+            owner_portfolio: String::new(),
+            owner_linkedin: String::new(),
+            owner_website: String::new(),
             profile: "automatizacion".into(),
             theme: "light".into(),
             entities: vec!["21".into(), "29".into()],
@@ -340,6 +346,16 @@ impl Settings {
             || self.owner_credential.chars().count() > 1000
         {
             return Err(invalid("Nombre o credencial inválidos"));
+        }
+        if [
+            &self.owner_portfolio,
+            &self.owner_linkedin,
+            &self.owner_website,
+        ]
+        .iter()
+        .any(|url| url.chars().count() > 300 || url.contains(['\r', '\n']))
+        {
+            return Err(invalid("Enlace de perfil inválido o demasiado largo"));
         }
         if !["automatizacion", "web_marketing"].contains(&self.profile.as_str())
             || !["light", "dark"].contains(&self.theme.as_str())

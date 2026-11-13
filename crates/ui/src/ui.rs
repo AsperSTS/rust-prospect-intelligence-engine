@@ -814,8 +814,9 @@ pub fn App() -> Element {
             }
         });
         let mut auto_clear_ui = toast_ui;
+        let ttl = Duration::from_secs(if is_error { 9 } else { 4 });
         spawn(async move {
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(ttl).await;
             auto_clear_ui
                 .notifications
                 .write()
@@ -961,6 +962,23 @@ pub fn App() -> Element {
                 if state.id != last_id || state.status != last_status {
                     if state.status != "running" {
                         job_ui.revision += 1;
+                    }
+                    if state.status == "completed" {
+                        let done_id = state.id.clone();
+                        let mut done_ui = job_ui;
+                        let mut done_state = job_state;
+                        spawn(async move {
+                            tokio::time::sleep(Duration::from_secs(4)).await;
+                            let still_done = done_ui.job.peek().as_ref().is_some_and(|j| {
+                                let snap = j.snapshot();
+                                snap.id == done_id && snap.status == "completed"
+                            });
+                            if still_done {
+                                done_ui.dismissed_job_id.set(done_id);
+                                done_ui.job.set(None);
+                                done_state.set(JobState::default());
+                            }
+                        });
                     }
                     last_id = state.id.clone();
                     last_status = state.status.clone();
@@ -2315,30 +2333,38 @@ mod review_tests {
         assert!(html0.contains("Base de datos y alcance"));
         assert!(html0.contains("Tokens y fuentes"));
         assert!(html0.contains(">Perfil<"));
+        assert!(html0.contains(">Plantillas de mensajes<"));
+        assert!(html0.contains("Ayuda sobre Perfil"));
+        assert!(html0.contains("Ayuda sobre Plantillas de mensajes"));
+        assert!(html0.contains("Ver ejemplos de diferenciador"));
         assert!(!html0.contains("Tu firma y metas"));
-        assert!(html0.contains("Tus datos en plantillas"));
-        assert!(html0.contains("Tu credencial"));
+        assert!(!html0.contains("Tu credencial"));
+        assert!(!html0.contains("Valor agregado"));
+        assert!(html0.contains("Nombre completo"));
+        assert!(html0.contains("Diferenciador"));
+        assert!(html0.contains("Portafolio"));
+        assert!(html0.contains("LinkedIn"));
+        assert!(html0.contains("Página web"));
         assert!(html0.contains("Metas diarias"));
-        assert!(html0.contains(">Editar<"));
-        assert!(html0.contains(">Vista previa<"));
-        for category in [
-            "WhatsApp",
-            "Asuntos de correo",
-            "Correos",
-            "Seguimientos",
-            "Giros",
-        ] {
+        assert!(!html0.contains(">Editar<"));
+        assert!(html0.contains("Vista previa en vivo"));
+        assert!(html0.contains("st-preview"));
+        assert!(html0.contains("st-prev-token"));
+        assert!(html0.contains("st-split-work"));
+        assert!(html0.contains("st-new-btn"));
+        assert!(!html0.contains("Tipo de plantilla"));
+        for category in ["WhatsApp", "Correos", "Seguimientos", "Giros"] {
             assert!(html0.contains(category), "{category}");
         }
-        assert!(html0.contains("Mensaje 10"));
+        assert!(!html0.contains("Asuntos de correo"));
+        assert!(html0.contains("Quién lleva el área"));
+        assert!(html0.contains("st-tpl-excerpt"));
         assert!(html0.contains("st-canvas-text"));
-        assert_eq!(
-            html0.matches("<textarea").count(),
-            2,
-            "one canvas plus the credential"
-        );
+        assert!(html0.contains("st-rich-input"));
+        assert!(html0.contains("st-rich-token"));
+        assert!(html0.contains("st-mini-pill"));
         assert!(html0.contains("Nuevo dato"));
-        assert!(html0.contains("[Tu nombre]"));
+        assert!(html0.contains("st-chip-info"));
         assert!(html0.contains("Guardar cambios"));
         assert!(!html0.contains("Cambios sin guardar"));
         assert!(!html0.contains("Bloque 1"));
@@ -2346,6 +2372,10 @@ mod review_tests {
         assert!(!html0.contains(">TOML<"));
         assert!(!html0.contains("Archivo local:"));
         assert!(!html0.contains("{nombre}"));
+        assert!(!html0.contains("{owner}"));
+        assert!(!html0.contains("st-ed-block"));
+        assert!(html0.contains("class=\"st-mini-pill own\">Nombre completo<"));
+        assert!(html0.contains("class=\"st-rich-lbl\">Nombre completo<"));
         assert!(!html0.contains("Audi México"));
 
         // Tab 1: Base de datos y alcance + Auto-update + Unified updates
@@ -2358,6 +2388,8 @@ mod review_tests {
         dom1.rebuild_in_place();
         let initial_html1 = dioxus_ssr::render(&dom1);
         assert!(initial_html1.contains(">Alcance<"));
+        assert!(initial_html1.contains("Ayuda sobre Alcance"));
+        assert!(initial_html1.contains("Ayuda sobre Tu base"));
         assert!(initial_html1.contains("1 estado elegido"));
         assert_eq!(initial_html1.matches("st-state active").count(), 1);
         assert_eq!(initial_html1.matches("st-state-name").count(), 32);
@@ -2402,6 +2434,8 @@ mod review_tests {
         dom2.rebuild_in_place();
         let html2 = dioxus_ssr::render(&dom2);
         assert!(html2.contains(">Tokens<"));
+        assert!(html2.contains("Ayuda sobre Tokens"));
+        assert!(html2.contains("Ayuda sobre Respaldo"));
         assert!(!html2.contains("Tokens locales"));
         assert!(!html2.contains("0600"));
         assert!(html2.contains("st-status ok"));

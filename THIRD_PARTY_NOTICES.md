@@ -302,15 +302,15 @@ Fuentes oficiales: [copyright y ODbL](https://www.openstreetmap.org/copyright), 
 | rgb | 0.8.53 | MIT | [Archivos](docs/licenses/rgb-0.8.53/) |
 | ring | 0.17.14 | Apache-2.0 AND ISC | [Archivos](docs/licenses/ring-0.17.14/) |
 | rusqlite | 0.41.1 | MIT | [Archivos](docs/licenses/rusqlite-0.41.1/) |
-| rust_xlsxwriter | 0.99.1 | MIT OR Apache-2.0 | [Archivos](docs/licenses/rust_xlsxwriter-0.99.1/) |
+| rust_xlsxwriter | 0.100.0 | MIT OR Apache-2.0 | [Archivos](docs/licenses/rust_xlsxwriter-0.100.0/) |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT | [Archivos](docs/licenses/rustc-hash-1.1.0/) |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | [Archivos](docs/licenses/rustc-hash-2.1.3/) |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | [Archivos](docs/licenses/rustc_version-0.4.1/) |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [Archivos](docs/licenses/rustix-1.1.5/) |
-| rustls | 0.23.45 | Apache-2.0 OR ISC OR MIT | [Archivos](docs/licenses/rustls-0.23.45/) |
+| rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT | [Archivos](docs/licenses/rustls-0.23.46/) |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 | [Archivos](docs/licenses/rustls-pki-types-1.15.1/) |
 | rustls-platform-verifier | 0.7.1 | MIT OR Apache-2.0 | [Archivos](docs/licenses/rustls-platform-verifier-0.7.1/) |
-| rustls-webpki | 0.103.15 | ISC | [Archivos](docs/licenses/rustls-webpki-0.103.15/) |
+| rustls-webpki | 0.103.16 | ISC | [Archivos](docs/licenses/rustls-webpki-0.103.16/) |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | [Archivos](docs/licenses/rustversion-1.0.23/) |
 | ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 | [Archivos](docs/licenses/ryu-1.0.23/) |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | [Archivos](docs/licenses/scopeguard-1.2.0/) |
@@ -363,7 +363,7 @@ Fuentes oficiales: [copyright y ODbL](https://www.openstreetmap.org/copyright), 
 | time-macros | 0.2.32 | MIT OR Apache-2.0 | [Archivos](docs/licenses/time-macros-0.2.32/) |
 | tinystr | 0.8.4 | Unicode-3.0 | [Archivos](docs/licenses/tinystr-0.8.4/) |
 | tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT | [Archivos](docs/licenses/tinyvec-1.13.3/) |
-| tokio | 1.53.2 | MIT | [Archivos](docs/licenses/tokio-1.53.2/) |
+| tokio | 1.53.3 | MIT | [Archivos](docs/licenses/tokio-1.53.3/) |
 | tokio-macros | 2.7.2 | MIT | [Archivos](docs/licenses/tokio-macros-2.7.2/) |
 | tokio-rustls | 0.26.6 | MIT OR Apache-2.0 | [Archivos](docs/licenses/tokio-rustls-0.26.6/) |
 | tokio-util | 0.7.19 | MIT | [Archivos](docs/licenses/tokio-util-0.7.19/) |
@@ -423,7 +423,7 @@ Fuentes oficiales: [copyright y ODbL](https://www.openstreetmap.org/copyright), 
 | zerotrie | 0.2.5 | Unicode-3.0 | [Archivos](docs/licenses/zerotrie-0.2.5/) |
 | zerovec | 0.11.8 | Unicode-3.0 | [Archivos](docs/licenses/zerovec-0.11.8/) |
 | zerovec-derive | 0.11.6 | Unicode-3.0 | [Archivos](docs/licenses/zerovec-derive-0.11.6/) |
-| zip | 8.6.0 | MIT | [Archivos](docs/licenses/zip-8.6.0/) |
+| zip | 9.0.0 | MIT | [Archivos](docs/licenses/zip-9.0.0/) |
 | zlib-rs | 0.6.8 | Zlib | [Archivos](docs/licenses/zlib-rs-0.6.8/) |
 | zmij | 1.0.23 | MIT | [Archivos](docs/licenses/zmij-1.0.23/) |
 | zopfli | 0.8.3 | Apache-2.0 | [Archivos](docs/licenses/zopfli-0.8.3/) |

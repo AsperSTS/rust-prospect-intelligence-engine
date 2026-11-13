@@ -9,7 +9,7 @@ use std::{
 
 pub const BUNDLED_TEMPLATES: &str = include_str!("../../../config/templates.toml");
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct Templates {
     pub whatsapp: BTreeMap<String, String>,
     pub email: BTreeMap<String, String>,
@@ -21,12 +21,15 @@ pub struct Templates {
 }
 
 /// Placeholder names owned by the application; user data cannot shadow them.
-pub const RESERVED_KEYS: [&str; 10] = [
+pub const RESERVED_KEYS: [&str; 13] = [
     "nombre",
     "owner",
     "owner_corto",
     "credencial",
     "whatsapp",
+    "portafolio",
+    "linkedin",
+    "web",
     "giro_corto",
     "cosa",
     "pregunta",
@@ -95,18 +98,20 @@ impl Templates {
             (&self.whatsapp, vec!["A", "B", "C", "D"]),
             (
                 &self.email,
-                vec![
-                    "asunto_A",
-                    "asunto_B",
-                    "cuerpo_con_credencial",
-                    "cuerpo_sin_credencial",
-                ],
+                vec!["cuerpo_con_credencial", "cuerpo_sin_credencial"],
             ),
             (&self.seguimiento, vec!["d3", "d7", "d14"]),
         ] {
             if keys.iter().any(|key| !map.contains_key(*key)) {
                 return Err(invalid("Faltan claves en las plantillas"));
             }
+        }
+        let has_unified_subjects = self.email.contains_key("asunto_con_credencial")
+            && self.email.contains_key("asunto_sin_credencial");
+        let has_legacy_subjects =
+            self.email.contains_key("asunto_A") && self.email.contains_key("asunto_B");
+        if !has_unified_subjects && !has_legacy_subjects {
+            return Err(invalid("Faltan claves en las plantillas"));
         }
         if !self.giros.contains_key("Otro")
             || self.giros.values().any(|g| {
@@ -242,9 +247,36 @@ fn whatsapp_key(t: &Templates, id: &str, evidence: bool) -> String {
     choose_key(keys, id, "whatsapp").unwrap_or_else(|| "A".into())
 }
 
-fn email_subject_key(t: &Templates, id: &str) -> String {
-    choose_key(keys_with_prefix(&t.email, "asunto_"), id, "email-subject")
-        .unwrap_or_else(|| "asunto_A".into())
+pub fn email_subject_key_for_body(body_key: &str) -> String {
+    if let Some(rest) = body_key.strip_prefix("cuerpo_") {
+        format!("asunto_{rest}")
+    } else {
+        format!("asunto_{body_key}")
+    }
+}
+
+/// Resolves the email subject key paired with `body_key`, falling back to
+/// detached legacy `asunto_*` keys when reading older local `templates.toml` files.
+pub fn resolve_email_subject_key(t: &Templates, body_key: &str, id: &str) -> String {
+    let paired = email_subject_key_for_body(body_key);
+    if t.email.contains_key(&paired) {
+        return paired;
+    }
+    if let Some(num) = body_key.rsplit('_').next() {
+        let numbered = format!("asunto_{num}");
+        if t.email.contains_key(&numbered) {
+            return numbered;
+        }
+    }
+    let legacy_default = if body_key.starts_with("cuerpo_sin_") {
+        "asunto_B"
+    } else {
+        "asunto_A"
+    };
+    if t.email.contains_key(legacy_default) {
+        return legacy_default.into();
+    }
+    choose_key(keys_with_prefix(&t.email, "asunto_"), id, "email-subject").unwrap_or(paired)
 }
 
 fn email_body_key(t: &Templates, id: &str, credential: bool) -> String {
@@ -332,6 +364,9 @@ fn vars(
         "whatsapp".into(),
         crate::contacts::pretty_phone(&settings.owner_whatsapp),
     );
+    values.insert("portafolio".into(), settings.owner_portfolio.trim().into());
+    values.insert("linkedin".into(), settings.owner_linkedin.trim().into());
+    values.insert("web".into(), settings.owner_website.trim().into());
     values
 }
 
@@ -345,10 +380,20 @@ fn render(source: &str, values: &BTreeMap<String, String>) -> String {
                 .unwrap_or_else(|| captures[0].into())
         })
         .to_string();
-    if values.get("whatsapp").is_some_and(|w| w.trim().is_empty()) {
+    let empty_labels: Vec<&str> = [
+        ("whatsapp", &["WhatsApp:"][..]),
+        ("portafolio", &["Portafolio:"][..]),
+        ("linkedin", &["LinkedIn:", "Linkedin:"][..]),
+        ("web", &["Página web:", "Web:"][..]),
+    ]
+    .into_iter()
+    .filter(|(k, _)| values.get(*k).is_some_and(|v| v.trim().is_empty()))
+    .flat_map(|(_, labels)| labels.iter().copied())
+    .collect();
+    if !empty_labels.is_empty() {
         rendered = rendered
             .lines()
-            .filter(|line| line.trim() != "WhatsApp:")
+            .filter(|line| !empty_labels.contains(&line.trim()))
             .collect::<Vec<_>>()
             .join("\n");
     }
@@ -425,18 +470,27 @@ pub fn first(
     } else {
         let credential = !settings.owner_credential.trim().is_empty()
             && hash_mod(&format!("{}:credential", p.id), 2) == 0;
-        let subject_key = email_subject_key(templates, &p.id);
         let body_key = email_body_key(templates, &p.id, credential);
-        let mut subject = render(&templates.email[&subject_key], &values);
+        let subject_key = resolve_email_subject_key(templates, &body_key, &p.id);
+        let mut subject = templates
+            .email
+            .get(&subject_key)
+            .map(|tpl| render(tpl, &values))
+            .unwrap_or_default();
         if subject.chars().count() > 60 {
             subject = format!("Pregunta sobre {}", values["cosa"]);
         }
         if subject.chars().count() > 60 {
             subject = "Una pregunta sobre sus procesos".into();
         }
+        let variante = if subject_key == email_subject_key_for_body(&body_key) {
+            format!("EM-{body_key}")
+        } else {
+            format!("EM-{body_key}-{subject_key}")
+        };
         Message {
             canal: channel.into(),
-            variante: format!("EM-{body_key}-{subject_key}"),
+            variante,
             cuerpo: render(&templates.email[&body_key], &values),
             asunto: subject,
             problemas: vec![],
@@ -618,9 +672,16 @@ mod editor_tests {
         Templates::ensure_file(temp.path()).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "personal");
         assert!(templates.whatsapp.len() >= 10);
-        assert!(keys_with_prefix(&templates.email, "asunto_").len() >= 10);
+        let bodies: Vec<String> = keys_with_prefix(&templates.email, "cuerpo_");
         assert!(keys_with_prefix(&templates.email, "cuerpo_con_").len() >= 10);
         assert!(keys_with_prefix(&templates.email, "cuerpo_sin_").len() >= 10);
+        for body in &bodies {
+            let subject_key = email_subject_key_for_body(body);
+            assert!(
+                templates.email.contains_key(&subject_key),
+                "Falta asunto pareado {subject_key} para {body}"
+            );
+        }
         for base in ["d3", "d7", "d14"] {
             assert!(
                 templates
@@ -649,7 +710,81 @@ mod editor_tests {
             render("Soy de {mi_empresa}.", &values),
             "Soy de Soluciones del Valle."
         );
+        let with_links = Settings {
+            owner_portfolio: "https://github.com/ejemplo".into(),
+            owner_linkedin: "https://linkedin.com/in/ejemplo".into(),
+            owner_website: "https://ejemplo.dev".into(),
+            ..Settings::default()
+        };
+        let link_values = vars(&Prospect::default(), &with_links, &templates, "");
+        assert_eq!(
+            render(
+                "Portafolio: {portafolio}\nLinkedIn: {linkedin}\nPágina web: {web}",
+                &link_values
+            ),
+            "Portafolio: https://github.com/ejemplo\nLinkedIn: https://linkedin.com/in/ejemplo\nPágina web: https://ejemplo.dev"
+        );
+        assert_eq!(
+            render(
+                "Hola\nPortafolio: {portafolio}\nLinkedIn: {linkedin}\nPágina web: {web}",
+                &values
+            ),
+            "Hola"
+        );
         templates.datos.insert("owner".into(), "x".into());
         assert!(templates.validate().is_err());
+    }
+
+    #[test]
+    fn email_uses_paired_subject_and_preserves_legacy_subject_fallback() {
+        let mut templates = Templates::parse_toml(Templates::bundled_source()).unwrap();
+        let prospect = Prospect {
+            id: "em-test".into(),
+            nombre: "Taller Norte".into(),
+            giro: "Manufactura".into(),
+            ..Prospect::default()
+        };
+        let settings = Settings::default();
+        let msg = first(
+            &prospect,
+            "email",
+            &[],
+            &settings,
+            &templates,
+            Profile::Automatizacion,
+        )
+        .unwrap();
+        assert_eq!(msg.canal, "email");
+        let body_key = msg.variante.strip_prefix("EM-").unwrap();
+        let subject_key = email_subject_key_for_body(body_key);
+        templates
+            .email
+            .insert(subject_key, "Asunto único {nombre}".into());
+        let updated = first(
+            &prospect,
+            "email",
+            &[],
+            &settings,
+            &templates,
+            Profile::Automatizacion,
+        )
+        .unwrap();
+        assert_eq!(updated.asunto, "Asunto único Taller Norte");
+
+        // Legacy file without paired asuntos falls back cleanly to asunto_A / asunto_B.
+        templates.email.retain(|k, _| !k.starts_with("asunto_"));
+        templates.email.insert("asunto_A".into(), "Legado A".into());
+        templates.email.insert("asunto_B".into(), "Legado B".into());
+        templates.validate().unwrap();
+        let legacy = first(
+            &prospect,
+            "email",
+            &[],
+            &settings,
+            &templates,
+            Profile::Automatizacion,
+        )
+        .unwrap();
+        assert!(!legacy.asunto.is_empty());
     }
 }

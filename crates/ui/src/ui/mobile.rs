@@ -630,7 +630,7 @@ mod tests {
             (Screen::Opportunities, "Nueva oportunidad"),
             (Screen::Metrics, "Embudo comercial"),
             (Screen::Indicators, "Sin indicadores guardados"),
-            (Screen::Settings, "Nombre del remitente"),
+            (Screen::Settings, "Perfil y firma"),
             (Screen::Updates, "DENUE"),
         ] {
             dom.in_runtime(|| navigate(screen, ui));

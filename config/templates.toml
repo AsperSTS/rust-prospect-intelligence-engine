@@ -17,20 +17,8 @@ I = "Buen día. Soy {owner}. No sé si este tema lo vea usted, pero quería preg
 J = "Hola. Soy {owner}. Estoy trabajando con soluciones sencillas para quitar trabajo repetitivo de procesos internos. Sobre {nombre}, me gustaría entender esto: {pregunta}"
 
 [email]
-asunto_A = "Consulta sobre {cosa}"
-asunto_B = "Pregunta sobre {cosa}"
-asunto_01 = "Una consulta sobre {cosa}"
-asunto_02 = "Pregunta para {nombre}"
-asunto_03 = "Sobre {cosa} en {nombre}"
-asunto_04 = "Consulta de proceso interno"
-asunto_05 = "Una pregunta operativa"
-asunto_06 = "Consulta sobre sus procesos"
-asunto_07 = "Pregunta breve sobre {cosa}"
-asunto_08 = "Sobre reportes y procesos internos"
-asunto_09 = "Consulta para el área que lleva {cosa}"
-asunto_10 = "Pregunta sobre cómo llevan {cosa}"
-
-# Compatibilidad con archivos locales anteriores.
+# Cada correo lleva su propio asunto (asunto_<misma_clave_del_cuerpo>).
+asunto_con_credencial = "Consulta sobre {cosa}"
 cuerpo_con_credencial = """Buen día,
 
 Soy {owner}. {credencial} Actualmente desarrollo soluciones para procesos internos.
@@ -44,6 +32,8 @@ Si es un proceso que hoy requiere bastante trabajo manual, puedo mostrarles un e
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+
+asunto_sin_credencial = "Pregunta sobre {cosa}"
 cuerpo_sin_credencial = """Buen día,
 
 Soy {owner}. Desarrollo herramientas de software y automatización para procesos internos.
@@ -58,6 +48,8 @@ Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
 
+asunto_con_01 = "Una consulta sobre {cosa}"
+
 cuerpo_con_01 = """Buen día,
 
 Soy {owner}. {credencial} Ahora desarrollo soluciones de software y automatización para procesos internos.
@@ -71,6 +63,7 @@ Si esto todavía implica trabajo manual, puedo enseñarles un ejemplo sencillo a
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_02 = "Pregunta para {nombre}"
 cuerpo_con_02 = """Buen día,
 
 Mi nombre es {owner}. {credencial}
@@ -84,6 +77,7 @@ No busco asumir cómo trabajan hoy. Si hay algo que valga la pena simplificar, p
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_03 = "Sobre {cosa} en {nombre}"
 cuerpo_con_03 = """Buen día,
 
 Soy {owner}. {credencial} Actualmente trabajo en digitalización de procesos internos.
@@ -97,6 +91,7 @@ Si el tema corresponde a otra persona, ¿me podrían orientar con quién revisar
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_04 = "Consulta de proceso interno"
 cuerpo_con_04 = """Buen día,
 
 Soy {owner}. {credencial} Actualmente desarrollo soluciones para operación interna.
@@ -110,6 +105,7 @@ Si les genera trabajo repetitivo, puedo mostrarles una forma sencilla de central
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_05 = "Procesos en {giro_corto}"
 cuerpo_con_05 = """Buen día,
 
 Soy {owner}. {credencial}
@@ -123,6 +119,7 @@ Si tiene sentido conversar, puedo enviarles un ejemplo concreto. Si no es su ár
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_06 = "Consulta sobre sus procesos"
 cuerpo_con_06 = """Buen día,
 
 Soy {owner}. {credencial} Mi trabajo está enfocado en software, datos y automatización para procesos internos.
@@ -136,6 +133,7 @@ Si hoy ya lo tienen bien resuelto, perfecto. Si hay una parte manual que quieran
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_07 = "Pregunta breve sobre {cosa}"
 cuerpo_con_07 = """Buen día,
 
 Soy {owner}. {credencial}
@@ -149,6 +147,7 @@ Con esa información puedo decirles si realmente hay algo útil que automatizar 
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_08 = "Sobre reportes y procesos"
 cuerpo_con_08 = """Buen día,
 
 Soy {owner}. {credencial} Actualmente desarrollo herramientas internas para hacer más simples reportes y procesos operativos.
@@ -160,6 +159,7 @@ Si es un tema que les consume tiempo, puedo compartirles un ejemplo muy sencillo
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_09 = "Duda puntual sobre {cosa}"
 cuerpo_con_09 = """Buen día,
 
 Soy {owner}. {credencial}
@@ -173,6 +173,7 @@ Si vale la pena revisarlo, puedo enseñarles un ejemplo relacionado con {cosa}. 
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_con_10 = "Cómo manejan {cosa}"
 cuerpo_con_10 = """Buen día,
 
 Soy {owner}. {credencial} Trabajo con digitalización, datos y automatización de procesos internos.
@@ -187,6 +188,7 @@ Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
 
+asunto_sin_01 = "Sobre {cosa} en {nombre}"
 cuerpo_sin_01 = """Buen día,
 
 Soy {owner}. Desarrollo software y automatizaciones para procesos internos.
@@ -200,6 +202,7 @@ Si este proceso les genera trabajo manual, puedo mostrarles un ejemplo sencillo 
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_02 = "Consulta para {nombre}"
 cuerpo_sin_02 = """Buen día,
 
 Mi nombre es {owner}. Trabajo desarrollando herramientas internas y automatizaciones.
@@ -213,6 +216,7 @@ No quiero asumir cómo trabajan actualmente. Si hay algo útil que simplificar, 
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_03 = "Sobre {cosa} y datos"
 cuerpo_sin_03 = """Buen día,
 
 Soy {owner}. Desarrollo soluciones de software para operación, datos y reportes.
@@ -226,6 +230,7 @@ Si el tema lo lleva otra persona, ¿me podrían indicar con quién revisarlo? Si
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_04 = "Una pregunta operativa"
 cuerpo_sin_04 = """Buen día,
 
 Soy {owner}. Trabajo con digitalización y automatización de procesos internos.
@@ -239,6 +244,7 @@ Si hoy ya lo tienen resuelto, perfecto. Si todavía hay una parte repetitiva, pu
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_05 = "Consulta sobre {giro_corto}"
 cuerpo_sin_05 = """Buen día,
 
 Soy {owner}. Estoy revisando empresas de {giro_corto} para entender cómo manejan algunos procesos operativos.
@@ -252,6 +258,7 @@ Si tiene sentido, puedo enseñarles un ejemplo relacionado con {cosa}. Si no es 
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_06 = "Captura repetida y procesos"
 cuerpo_sin_06 = """Buen día,
 
 Soy {owner}. Desarrollo herramientas internas para reducir captura repetida y concentrar información.
@@ -265,6 +272,7 @@ Si hay una oportunidad real de simplificarlo, puedo mostrarles un ejemplo corto.
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_07 = "Duda breve sobre {cosa}"
 cuerpo_sin_07 = """Buen día,
 
 Soy {owner}. Trabajo en software y automatización.
@@ -278,6 +286,7 @@ Si vale la pena revisarlo, puedo compartir una idea concreta por este mismo corr
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_08 = "Reportes y procesos internos"
 cuerpo_sin_08 = """Buen día,
 
 Soy {owner}. Desarrollo soluciones sencillas para reportes y procesos internos.
@@ -289,6 +298,7 @@ Si esto requiere bastante trabajo manual, puedo mostrarles cómo podría central
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_09 = "Duda sobre operación interna"
 cuerpo_sin_09 = """Buen día,
 
 Soy {owner}. Les escribo por una duda puntual sobre su operación:
@@ -300,6 +310,7 @@ Trabajo desarrollando herramientas para procesos internos. Si el tema aplica, pu
 Saludos,
 {owner}
 WhatsApp: {whatsapp}"""
+asunto_sin_10 = "Área que lleva {cosa}"
 cuerpo_sin_10 = """Buen día,
 
 Soy {owner}. Desarrollo software, automatizaciones y herramientas de datos para procesos internos.

@@ -103,9 +103,10 @@ pub(super) fn ScopeTab(mut draft: Signal<Settings>, mut pane: Signal<usize>) -> 
             section { class: "panel st-scope",
                 div { class: "panel-heading",
                     h2 { "Alcance" }
-                    span { class: "muted small",
+                    span { class: "muted small st-head-meta",
                         if snapshot.entities.len() == 1 { "1 estado elegido" } else { "{snapshot.entities.len()} estados elegidos" }
                     }
+                    super::HelpButton { topic: super::HelpTopic::Scope, label: "Alcance" }
                 }
                 div { class: "form-body",
                     div { class: "st-block st-block-grow",
@@ -235,11 +236,14 @@ pub(super) fn ScopeTab(mut draft: Signal<Settings>, mut pane: Signal<usize>) -> 
                             "Tu base · Web y marketing"
                         }
                     }
-                    Segmented {
-                        name: "Vista de la base",
-                        options: vec![("states".to_owned(), "Estados"), ("history".to_owned(), "Historial")],
-                        value: if showing_history { "history" } else { "states" },
-                        onpick: move |view: String| history.set(view == "history"),
+                    div { class: "st-head-actions",
+                        Segmented {
+                            name: "Vista de la base",
+                            options: vec![("states".to_owned(), "Estados"), ("history".to_owned(), "Historial")],
+                            value: if showing_history { "history" } else { "states" },
+                            onpick: move |view: String| history.set(view == "history"),
+                        }
+                        super::HelpButton { topic: super::HelpTopic::Base, label: "Tu base" }
                     }
                 }
                 if let Some(status) = resource_status(data, "el estado de tu base") {
